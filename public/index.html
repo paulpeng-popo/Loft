@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Loft</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+    <h1><span class="logo" data-icon="download"></span> Loft</h1>
+    <nav>
+        <button data-tab="settings" data-icon="settings">設定</button>
+    </nav>
+    <div class="header-tools">
+        <button id="font-down" class="icon text-icon" title="字小一點（Ctrl+-）">A−</button>
+        <button id="font-up" class="icon text-icon" title="字大一點（Ctrl+=）">A＋</button>
+        <button id="theme-toggle" class="icon" title="切換深淺色"></button>
+        <div id="auth-badge" class="badge">…</div>
+    </div>
+</header>
+
+<main>
+    <!-- Settings -->
+    <section id="tab-settings" class="tab hidden">
+        <div class="settings-cols">
+        <div class="s-col">
+        <div class="card">
+            <h2>Telegram 登入</h2>
+            <div id="login-done" class="hidden">
+                <p>已登入：<b id="login-user"></b></p>
+                <button id="btn-logout" class="danger">登出並清除 session</button>
+            </div>
+            <div id="login-form">
+                <p class="muted">先到 <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org/apps</a> 建立應用程式，取得 api_id 與 api_hash。</p>
+                <div class="grid">
+                    <label>api_id <input id="set-api-id" inputmode="numeric"></label>
+                    <label>api_hash <input id="set-api-hash" type="password" placeholder="已儲存時留空即可"></label>
+                </div>
+                <button id="btn-save-api">儲存 API 憑證</button>
+                <div class="step" id="step-phone" style="margin-top:1rem">
+                    <label>手機號碼（含國碼，例如 +886912345678） <input id="login-phone"></label>
+                    <button id="btn-send-code" class="primary">傳送驗證碼</button>
+                </div>
+                <div class="step hidden" id="step-code">
+                    <label>驗證碼 <span id="code-hint" class="muted"></span> <input id="login-code" inputmode="numeric"></label>
+                    <button id="btn-sign-in" class="primary">登入</button>
+                </div>
+                <div class="step hidden" id="step-password">
+                    <label>兩步驟驗證密碼 <input id="login-password" type="password"></label>
+                    <button id="btn-password" class="primary">送出</button>
+                </div>
+            </div>
+            <p class="muted">登入資料只存在本機資料夾的 <code>session.txt</code>。網頁只聽 127.0.0.1，不對外開放。</p>
+        </div>
+
+        </div>
+        </div>
+    </section>
+</main>
+
+<!-- Generic prompt dialog -->
+<dialog id="ask-dialog">
+    <h2 id="ask-title"></h2>
+    <div id="ask-body"></div>
+    <div class="actions" id="ask-buttons"></div>
+</dialog>
+
+<div id="toast"></div>
+<script src="icons.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
