@@ -3,3 +3,7 @@ node_modules/
 data/
 # Build output
 dist/
+# Local Windows launcher build (npm run runtime) and its shortcut
+runtime/
+runtime-build/
+*.lnk

@@ -1,0 +1,33 @@
+{
+    "appId": "io.github.paulpeng-popo.loft",
+    "productName": "Loft",
+    "directories": {
+        "output": "runtime-build",
+        "buildResources": "build"
+    },
+    "extraMetadata": {
+        "main": "electron/launcher.js"
+    },
+    "files": [
+        "electron/launcher.js",
+        "package.json",
+        "!node_modules/**"
+    ],
+    "asar": true,
+    "electronLanguages": [
+        "zh-TW",
+        "en-US"
+    ],
+    "npmRebuild": false,
+    "win": {
+        "target": [
+            {
+                "target": "dir",
+                "arch": [
+                    "x64"
+                ]
+            }
+        ],
+        "icon": "build/icon.png"
+    }
+}

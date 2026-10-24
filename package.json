@@ -11,6 +11,7 @@
     "scripts": {
         "start": "node --no-warnings=ExperimentalWarning src/server.js",
         "app": "electron .",
+        "runtime": "electron-builder --config build/launcher.json --win dir",
         "dist": "electron-builder",
         "dist:win": "electron-builder --win",
         "dist:mac": "electron-builder --mac",
@@ -39,6 +40,7 @@
         },
         "files": [
             "electron/**",
+            "!electron/launcher.js",
             "src/**",
             "public/**",
             "build/icon.png",
