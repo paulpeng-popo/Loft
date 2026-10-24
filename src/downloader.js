@@ -1,4 +1,4 @@
-// Downloads: scheduled tasks and media wall downloads all go through one queue, one job at a time.
+// Downloads: scheduled tasks, media wall downloads and auto-download of new media all go through one queue, one job at a time.
 // Duplicate checks are built in, nothing to configure:
 //   Before download: hidden -> this message already downloaded -> this Telegram file already downloaded -> looks the same (similarity fingerprint)
 //   After download: same content hash -> delete the just-downloaded temp file right away (not sent to the Recycle Bin)
@@ -399,7 +399,7 @@ async function runTask(taskId, trigger) {
 }
 
 /**
- * Download specific messages (media wall selection, failure retry). items = [{ chat, id, taskId? }]
+ * Download specific messages (media wall selection, failure retry, auto-download of new media). items = [{ chat, id, taskId? }]
  * opts.force: download anyway, skips the duplicate checks (except for this exact message already downloaded)
  */
 async function runBatch(job) {
@@ -436,6 +436,7 @@ async function runBatch(job) {
                 if (entry) runFps.push(entry);
                 await downloadOne({ task: owner, msg, info, key, chatTitle, dir: destDir(owner, chatTitle), stats, fp: pre.fp });
                 if (entry) runFps.splice(runFps.indexOf(entry), 1);
+                if (owner && owner.auto && msg.id > (owner.last_msg_id || 0)) tasks.setProgress(owner.id, msg.id);
             } catch (e) {
                 stats.failed++;
                 log(`下載 #${it.id} 失敗：${e.errorMessage || e.message}`);
@@ -456,7 +457,7 @@ async function runBatch(job) {
 // ---- Queue ----
 function enqueue(taskId, trigger = 'manual') {
     taskId = Number(taskId);
-    // Don't queue something twice; a running job may be queued again
+    // Don't queue something twice; a running job may be queued again (auto-download: new media arrived while it was running)
     if (state.queue.some((q) => q.taskId === taskId && !q.batch)) return false;
     state.queue.push({ taskId, trigger });
     pump();

@@ -11,6 +11,7 @@ let loading = false;
 let wallSeq = 0; // bumped whenever the group or filters change; stale responses are dropped
 const selected = new Set(); // selected msgIds
 let lastClicked = null; // for Shift range selection
+let pendingNew = 0; // new media that arrived while scrolled down
 
 function avatarHtml(chat) {
     const color = AVATAR_COLORS[Math.abs(parseInt(String(chat.id).slice(-4), 10) || 0) % AVATAR_COLORS.length];
@@ -20,6 +21,7 @@ function avatarHtml(chat) {
 }
 
 const fmtDuration = (s) => (s == null ? '' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+const fmtCount = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n));
 
 // =====================================================================
 // Left: group list
@@ -56,16 +58,23 @@ function renderChats() {
     $('#c-folders').classList.toggle('hidden', !folders.length);
     const list = chats.filter((d) => {
         if (folder ? !inFolder(d, folder) : d.archived !== $('#c-archived').checked) return false;
-        if (type && d.type !== type) return false;
+        if (type === 'new' && !d.newCount) return false;
+        if (type === 'auto' && !d.auto) return false;
+        if (type && !['new', 'auto'].includes(type) && d.type !== type) return false;
         return !q || d.title.toLowerCase().includes(q) || (d.username || '').toLowerCase().includes(q);
     });
     $('#c-list').innerHTML = list.map((d) => `<li data-id="${esc(d.id)}" class="${cur && cur.id === d.id ? 'active' : ''}">
         ${avatarHtml(d)}
         <div class="c-body">
-            <div class="c-title"><span class="t">${esc(d.title)}</span></div>
+            <div class="c-title"><span class="t">${esc(d.title)}</span>${d.auto ? `<span class="c-auto" title="自動下載新媒體">${ico('download')}</span>` : ''}</div>
             <div class="c-sub muted">${esc([CHAT_TYPES[d.type], d.forum ? '論壇' : '', d.username ? `@${d.username}` : ''].filter(Boolean).join('・'))}</div>
         </div>
+        ${d.newCount ? `<span class="bubble-count" title="自從上次打開後新增的媒體">${fmtCount(d.newCount)}</span>` : ''}
     </li>`).join('') || '<li class="muted" style="justify-content:center">這裡沒有群組</li>';
+    const withNew = chats.filter((d) => d.newCount).length;
+    $('#nav-new').textContent = withNew;
+    $('#nav-new').classList.toggle('hidden', !withNew);
+    $('#nav-new').title = `${withNew} 個群組有新媒體`;
 }
 
 $('#c-q').addEventListener('input', renderChats);
@@ -99,6 +108,7 @@ async function openChat(d) {
     $('#m-avatar').outerHTML = avatarHtml(d).replace('class="avatar"', 'id="m-avatar" class="avatar"');
     $('#m-title').textContent = d.title;
     $('#m-sub').textContent = [CHAT_TYPES[d.type], d.username ? `@${d.username}` : '', d.noforwards ? '禁止儲存的頻道（一樣可以下載）' : ''].filter(Boolean).join('・');
+    $('#m-auto').checked = !!d.auto;
     // Forum groups: topic menu
     const topicSel = $('#m-topic');
     topicSel.classList.add('hidden');
@@ -110,7 +120,14 @@ async function openChat(d) {
             topicSel.classList.remove('hidden');
         }).catch(() => {});
     }
+    reportPresence();
     await reloadWall();
+    // Opening it counts as seen: reset the badge
+    api('POST', `/api/chat/${enc(d.id)}/seen`, {}).catch(() => {});
+    if (d.newCount) {
+        d.newCount = 0;
+        renderChats();
+    }
 }
 $('#m-back').addEventListener('click', () => {
     $('.browse').classList.remove('open');
@@ -134,6 +151,8 @@ async function reloadWall() {
     wallSeq++;
     items = [];
     cursor = 0;
+    pendingNew = 0;
+    $('#m-newbar').classList.add('hidden');
     $('#m-grid').innerHTML = Array.from({ length: 24 }, () => '<div class="tile skeleton"></div>').join('');
     $('#m-end').textContent = '';
     $('#m-wall').scrollTop = 0;
@@ -169,8 +188,9 @@ async function loadMore() {
 const dayKey = (iso) => new Date(iso).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
 
 function tileHtml(it) {
-    const flag = it.status === 'done' ? `<span class="flag done" title="已下載：${esc(it.path || '')}">${ico('check')}已下載</span>`
-        : it.status === 'dup' || it.status === 'similar' ? `<span class="flag dup" title="${esc(`${it.dupOf ? it.dupOf.why : '重複'}：${it.dupOf ? it.dupOf.path : ''}`)}">重複</span>` : '';
+    const flag = it.isNew ? `<span class="flag new">新</span>`
+        : it.status === 'done' ? `<span class="flag done" title="已下載：${esc(it.path || '')}">${ico('check')}已下載</span>`
+            : it.status === 'dup' || it.status === 'similar' ? `<span class="flag dup" title="${esc(`${it.dupOf ? it.dupOf.why : '重複'}：${it.dupOf ? it.dupOf.path : ''}`)}">重複</span>` : '';
     let info = '';
     if (it.kind === 'video' || it.kind === 'video_note') info = `${ico('play')}${fmtDuration(it.duration)}`;
     else if (it.kind === 'gif') info = 'GIF';
@@ -199,6 +219,15 @@ function appendTiles(list) {
     }
     grid.insertAdjacentHTML('beforeend', html);
     grid.dataset.lastDay = lastDay;
+}
+
+function redrawWall() {
+    const grid = $('#m-grid');
+    const top = $('#m-wall').scrollTop;
+    grid.innerHTML = '';
+    grid.dataset.lastDay = '';
+    appendTiles(items);
+    $('#m-wall').scrollTop = top;
 }
 
 function updateTile(it) {
@@ -240,6 +269,7 @@ async function refreshStatuses() {
         const status = v ? v.status : it.status === 'similar' ? 'similar' : null;
         if (status !== it.status || (v && v.path !== it.path)) {
             Object.assign(it, v || { status });
+            it.isNew = false;
             updateTile(it);
         }
     }
@@ -258,10 +288,11 @@ for (const id of ['#m-min', '#m-q']) {
 }
 $('#m-reload').addEventListener('click', () => guard(reloadWall)());
 
-// Near the bottom: load the next page
+// Near the bottom: load the next page; back at the top: dismiss the new media notice
 $('#m-wall').addEventListener('scroll', () => {
     const w = $('#m-wall');
     if (w.scrollTop + w.clientHeight >= w.scrollHeight - 600) guard(loadMore)();
+    if (w.scrollTop < 40 && pendingNew) showPendingNew();
 });
 
 // ---- Selection ----
@@ -366,6 +397,23 @@ $('#m-make-task').addEventListener('click', () => {
     openTask(null, { chat: { id: cur.id, title: cur.title }, filters: filtersFromWall() });
 });
 
+// ---- Auto-download new media ----
+$('#m-auto').addEventListener('change', guard(async (e) => {
+    if (!cur) return;
+    const on = e.target.checked;
+    try {
+        await api('POST', `/api/chat/${enc(cur.id)}/auto`, { on });
+    } catch (err) {
+        e.target.checked = !on;
+        throw err;
+    }
+    cur.auto = on;
+    const d = chats.find((x) => x.id === cur.id);
+    if (d) d.auto = on;
+    renderChats();
+    toast(on ? `已開啟：「${cur.title}」之後的新媒體會自動下載（舊的要抓請用「下載全部符合條件的」）` : '已關閉自動下載');
+}));
+
 // ---- Context menu ----
 let ctxMenu = null;
 function closeCtx() {
@@ -430,6 +478,77 @@ async function hideItem(it) {
     toast('已隱藏（含相似的）');
     checkSimilar(cur, items.filter((x) => !x.status));
 }
+
+// =====================================================================
+// Live updates: new media, badge counts
+// =====================================================================
+function connectEvents() {
+    const es = new EventSource('/api/events');
+    let countTimer;
+    es.onmessage = (ev) => {
+        let u;
+        try { u = JSON.parse(ev.data); } catch { return; }
+        const d = chats.find((x) => x.id === u.chatId);
+        if (d && u.count != null) d.newCount = u.count;
+        clearTimeout(countTimer);
+        countTimer = setTimeout(renderChats, 300);
+        if (u.type === 'media' && cur && cur.id === u.chatId) onNewMedia();
+    };
+    es.onerror = () => {
+        es.close();
+        setTimeout(connectEvents, 5000);
+    };
+}
+
+// New media in the group being viewed: add it directly when at the top, otherwise show a notice while scrolled down
+let newTimer;
+function onNewMedia() {
+    clearTimeout(newTimer);
+    newTimer = setTimeout(guard(async () => {
+        // Oldest-first order or active filters: don't insert, it shows up after a refresh
+        if ($('#m-order').value !== 'new') return;
+        if ($('#m-wall').scrollTop > 40) {
+            pendingNew++;
+            $('#m-newbtn').textContent = `↑ ${pendingNew} 個新媒體`;
+            $('#m-newbar').classList.remove('hidden');
+            return;
+        }
+        await prependNew();
+    }), 1500);
+}
+async function showPendingNew() {
+    pendingNew = 0;
+    $('#m-newbar').classList.add('hidden');
+    await prependNew();
+}
+$('#m-newbtn').addEventListener('click', guard(async () => {
+    $('#m-wall').scrollTop = 0;
+    await showPendingNew();
+}));
+async function prependNew() {
+    if (!cur) return;
+    const chat = cur;
+    const params = new URLSearchParams({ ...wallParams(), cursor: 0, limit: 30 });
+    const r = await api('GET', `/api/chat/${enc(chat.id)}/media?${params}`);
+    if (cur !== chat) return;
+    const top = items.length ? Math.max(...items.map((x) => x.id)) : 0;
+    const fresh = r.items.filter((it) => it.id > top);
+    if (!fresh.length) return;
+    for (const it of fresh) it.isNew = true;
+    items.unshift(...fresh);
+    redrawWall();
+    updateSelection();
+    checkSimilar(chat, fresh);
+    // Being viewed, so it doesn't count as new
+    api('POST', `/api/chat/${enc(chat.id)}/seen`, { maxId: fresh[0].id }).catch(() => {});
+}
+
+// Tell the server which group is being viewed (new media in that group doesn't count towards its badge)
+function reportPresence() {
+    api('POST', '/api/presence', { chatId: currentTab === 'media' && cur ? cur.id : null, visible: document.visibilityState === 'visible' }).catch(() => {});
+}
+document.addEventListener('visibilitychange', reportPresence);
+setInterval(reportPresence, 30000);
 
 // =====================================================================
 // Viewer
@@ -542,3 +661,5 @@ $('#viewer').addEventListener('wheel', (e) => {
     wheelAt = Date.now();
     guard(viewerStep)(e.deltaY > 0 ? 1 : -1);
 }, { passive: true });
+
+window.addEventListener('DOMContentLoaded', connectEvents);

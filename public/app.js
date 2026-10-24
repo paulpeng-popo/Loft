@@ -158,6 +158,7 @@ function showTab(name) {
         guard(loadCacheSize)();
         guard(loadHiddenCount)();
     }
+    if (typeof reportPresence === 'function') reportPresence();
     try { localStorage.setItem('tab', name); } catch { /* private mode */ }
 }
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -288,7 +289,7 @@ $('#btn-password').addEventListener('click', guard(async () => {
     pollStatus();
 }));
 $('#btn-logout').addEventListener('click', guard(async () => {
-    if (!(await confirmBox('確定登出？排程任務在重新登入前都不會執行。', { ok: '登出', danger: true }))) return;
+    if (!(await confirmBox('確定登出？排程任務和自動下載在重新登入前都不會執行。', { ok: '登出', danger: true }))) return;
     await api('POST', '/api/auth/logout');
     pollStatus();
 }));

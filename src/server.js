@@ -10,6 +10,7 @@ const tg = require('./tg');
 const downloader = require('./downloader');
 const scheduler = require('./scheduler');
 const browse = require('./browse');
+const watch = require('./watch');
 
 const PORT = Number(process.env.PORT) || 8787;
 const app = express();
@@ -86,10 +87,12 @@ app.post('/api/auth/sign-in', wrap((req) => tg.signIn(req.body.code)));
 app.post('/api/auth/password', wrap((req) => tg.signInPassword(String(req.body.password || ''))));
 app.post('/api/auth/logout', wrap(() => tg.logout()));
 
-// ---- Chat list ----
+// ---- Chat list (with new media counts and whether auto-download is on) ----
 app.get('/api/dialogs', wrap(async (req) => {
     const list = await tg.listDialogs(req.query.refresh === '1');
-    return list.filter((d) => !d.migrated);
+    const counts = watch.counts();
+    const auto = new Set(watch.autoChats());
+    return list.filter((d) => !d.migrated).map((d) => ({ ...d, newCount: counts[d.id] || 0, auto: auto.has(d.id) }));
 }));
 app.get('/api/folders', wrap(() => browse.folders()));
 app.post('/api/resolve', wrap(async (req) => {
@@ -139,6 +142,8 @@ app.post('/api/chat/:chat/status', wrap((req) => {
     return out;
 }));
 app.get('/api/chat/:chat/topics', wrap((req) => browse.topics(req.params.chat)));
+app.post('/api/chat/:chat/seen', wrap((req) => watch.seen(req.params.chat, req.body.maxId)));
+app.post('/api/chat/:chat/auto', wrap((req) => watch.setAuto(req.params.chat, !!req.body.on)));
 app.get('/api/chat/:chat/thumb/:msg', sendImage((req) => browse.thumb(req.params.chat, req.params.msg, req.query.s === 'small' ? 'small' : 'large')));
 app.get('/api/chat/:chat/file/:msg', (req, res) => {
     browse.original(req.params.chat, req.params.msg)
@@ -205,6 +210,21 @@ app.post('/api/download', wrap((req) => ({
 // The media wall's download-all-matches button: one run with the current filters (not saved as a task)
 app.post('/api/download-all', wrap((req) => ({ queued: downloader.enqueueAdhoc(validateTask(req.body)) })));
 
+// ---- Live updates ----
+app.post('/api/presence', wrap((req) => watch.setPresence(req.body)));
+// Live updates (Server-Sent Events): new media and badge counts
+app.get('/api/events', (req, res) => {
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    res.flushHeaders();
+    const send = (u) => res.write(`data: ${JSON.stringify(u)}\n\n`);
+    const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+    watch.events.on('update', send);
+    req.on('close', () => {
+        clearInterval(ping);
+        watch.events.off('update', send);
+    });
+});
+
 app.get('/api/cache', wrap(() => browse.cacheSize()));
 app.delete('/api/cache', wrap(() => {
     browse.clearCache(['thumb', 'file', 'avatar']);
@@ -267,9 +287,11 @@ function start() {
             const url = `http://127.0.0.1:${PORT}`;
             downloader.log(`Web 介面：${url}`);
             scheduler.reload();
-            // If there is a login, connect right away
+            watch.start();
+            // If there is a login, connect first; once logged in, catch up on new media counts and auto-downloads
             tg.authStatus().then((s) => {
                 downloader.log(s.authorized ? `已登入：${s.user.name}` : '尚未登入 Telegram');
+                if (s.authorized) watch.catchUp().catch((e) => downloader.log(`新媒體補算失敗：${e.message}`));
             });
             resolve({ url });
         });

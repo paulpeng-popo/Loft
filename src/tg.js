@@ -1,9 +1,11 @@
-// Telegram connection, login, chat list
+// Telegram connection, login, chat list, new message events
 const fs = require('node:fs');
 const path = require('node:path');
 const { TelegramClient, Api, utils } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { Logger } = require('telegram/extensions');
+const { NewMessage } = require('telegram/events');
+const { EventEmitter } = require('node:events');
 const { DATA_DIR, getSetting } = require('./db');
 const { log } = require('./log');
 
@@ -17,8 +19,26 @@ let dialogCache = { at: 0, list: [], entities: new Map() };
 // Chats seen before but not in the chat list (e.g. public channels)
 const extraEntities = new Map();
 
+// New message events: 'incoming' carries the gramjs message object, used for new media counts and auto-download
+const events = new EventEmitter();
+events.setMaxListeners(50);
+
 const peerKey = (peer) => utils.getPeerId(peer).toString();
 const selfId = () => (me ? me.id.toString() : null);
+
+function onNewMessage(msg) {
+    if (!msg || !msg.peerId) return;
+    const chatId = peerKey(msg.peerId);
+    const d = dialogCache.list.find((x) => x.id === chatId);
+    if (d) {
+        d.lastDate = new Date(msg.date * 1000).toISOString();
+        d.lastId = Math.max(d.lastId || 0, msg.id);
+    } else {
+        // New chat: refetch the list next time it is read
+        dialogCache.at = 0;
+    }
+    events.emit('incoming', { msg, chatId });
+}
 
 // Topic id of a message in a forum group (the General topic is 1)
 function topicOf(msg) {
@@ -41,6 +61,25 @@ async function forumTopics(c, entity) {
         offset = { offsetDate: lm ? lm.date : 0, offsetId: last.topMessage, offsetTopic: last.id };
     }
     return all;
+}
+
+function attachUpdates(c) {
+    c.addEventHandler((e) => {
+        try {
+            onNewMessage(e.message);
+        } catch {
+            // A failed update handler doesn't affect anything else
+        }
+    }, new NewMessage({}));
+}
+
+// Telegram only starts pushing updates after this session has called updates.getState
+async function startUpdates() {
+    try {
+        if (await client.checkAuthorization()) await client.invoke(new Api.updates.GetState());
+    } catch {
+        // Skipped when not logged in; called again after login
+    }
 }
 
 function rememberEntity(key, entity) {
@@ -77,7 +116,9 @@ async function getClient() {
             baseLogger: new Logger('error'),
         });
         await c.connect();
+        attachUpdates(c);
         client = c;
+        await startUpdates();
         return c;
     })();
     try {
@@ -164,6 +205,7 @@ async function loggedIn() {
     clearAuthCache();
     saveSession();
     me = await client.getMe();
+    await startUpdates();
     log(`登入成功：${[me.firstName, me.lastName].filter(Boolean).join(' ')}`);
 }
 
@@ -263,5 +305,5 @@ async function resolveChat(chatId) {
 
 module.exports = {
     getClient, resetClient, authStatus, sendCode, signIn, signInPassword, logout,
-    listDialogs, resolveChat, rememberEntity, peerKey, selfId, forumTopics, topicOf,
+    listDialogs, resolveChat, rememberEntity, peerKey, events, selfId, forumTopics, topicOf,
 };

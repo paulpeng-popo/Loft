@@ -10,7 +10,7 @@
 <header>
     <h1><span class="logo" data-icon="download"></span> Loft</h1>
     <nav>
-        <button data-tab="media" data-icon="image">媒體</button>
+        <button data-tab="media" data-icon="image">媒體 <span id="nav-new" class="nav-count hidden"></span></button>
         <button data-tab="tasks" data-icon="clock">任務</button>
         <button data-tab="downloads" data-icon="download">下載紀錄 <span id="nav-fail" class="nav-count hidden" title="下載失敗"></span></button>
         <button data-tab="runs" data-icon="chart">執行紀錄</button>
@@ -45,6 +45,8 @@
                             <option value="channel">頻道</option>
                             <option value="group">群組</option>
                             <option value="user">私訊</option>
+                            <option value="new">有新媒體</option>
+                            <option value="auto">自動下載中</option>
                         </select>
                         <label class="check"><input type="checkbox" id="c-archived"> 封存</label>
                         <button id="c-refresh" class="icon" data-icon="refresh" title="重新整理列表"></button>
@@ -60,6 +62,7 @@
                         <li>點開就是媒體牆，論壇群組會把所有話題合在一起</li>
                         <li>勾選後「下載選取」，或「下載全部符合條件的」</li>
                         <li>重複的會自動略過；不想看到的按右鍵「隱藏（含相似的）」</li>
+                        <li>開啟「自動下載新媒體」，之後有新媒體就自動抓</li>
                     </ul>
                 </div>
                 <div id="m-chat" class="hidden">
@@ -70,6 +73,7 @@
                             <b id="m-title"></b>
                             <div id="m-sub" class="muted"></div>
                         </div>
+                        <label class="switch" title="開啟後，這裡一有新媒體就照下載設定自動下載（Loft 關著時進來的，下次開啟會補抓）"><input type="checkbox" id="m-auto"><span class="track"></span>自動下載新媒體</label>
                         <button id="m-reload" class="icon" data-icon="refresh" title="重新整理媒體牆"></button>
                     </div>
                     <div class="filterbar">
@@ -103,6 +107,7 @@
                         <button id="m-make-task" class="small" title="用上面的篩選條件建立排程任務">建立排程任務</button>
                     </div>
                     <div id="m-wall">
+                        <div class="newbar hidden" id="m-newbar"><button id="m-newbtn"></button></div>
                         <div id="m-grid" class="wall"></div>
                         <div id="m-end" class="wall-end"></div>
                     </div>

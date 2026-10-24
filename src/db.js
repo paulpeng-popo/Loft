@@ -97,6 +97,12 @@ CREATE TABLE IF NOT EXISTS hidden (
     size INTEGER,
     hidden_at TEXT NOT NULL
 );
+-- Per chat: the last message seen when the media wall was opened, and how many media were added since
+CREATE TABLE IF NOT EXISTS chat_state (
+    chat_id TEXT PRIMARY KEY,
+    seen_id INTEGER NOT NULL DEFAULT 0,
+    new_count INTEGER NOT NULL DEFAULT 0
+);
 `);
 
 // Tables and settings left over from before the redesign (filter rules, forwarding, folder upload, notifications, inbox): no longer used, drop them
@@ -148,6 +154,8 @@ function taskValues(t) {
 const tasks = {
     list: () => db.prepare('SELECT * FROM tasks ORDER BY id').all().map(parseTask),
     get: (id) => parseTask(db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)),
+    autoFor: (chatId) => parseTask(db.prepare('SELECT * FROM tasks WHERE auto = 1 AND chat_id = ?').get(String(chatId))),
+    autoChats: () => db.prepare('SELECT chat_id FROM tasks WHERE auto = 1 AND enabled = 1').all().map((r) => r.chat_id),
     create(t) {
         const v = taskValues(t);
         const r = db.prepare(`INSERT INTO tasks (${TASK_FIELDS.join(', ')}, created_at) VALUES (${TASK_FIELDS.map(() => '?').join(', ')}, ?)`)
@@ -252,7 +260,17 @@ const hidden = {
     remove: (key) => db.prepare('DELETE FROM hidden WHERE file_key = ?').run(key),
 };
 
+const chatState = {
+    all: () => db.prepare('SELECT * FROM chat_state').all(),
+    get: (id) => db.prepare('SELECT * FROM chat_state WHERE chat_id = ?').get(String(id)),
+    init: (id, seenId) => db.prepare('INSERT OR IGNORE INTO chat_state (chat_id, seen_id, new_count) VALUES (?, ?, 0)').run(String(id), Number(seenId) || 0),
+    seen: (id, seenId) => db.prepare(`INSERT INTO chat_state (chat_id, seen_id, new_count) VALUES (?, ?, 0)
+        ON CONFLICT(chat_id) DO UPDATE SET seen_id = MAX(seen_id, excluded.seen_id), new_count = 0`).run(String(id), Number(seenId) || 0),
+    add: (id, n) => db.prepare('UPDATE chat_state SET new_count = new_count + ? WHERE chat_id = ?').run(n, String(id)),
+    setCount: (id, n) => db.prepare('UPDATE chat_state SET new_count = ? WHERE chat_id = ?').run(n, String(id)),
+};
+
 // Runs that were still going when the app was last closed
 db.prepare("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'").run(now());
 
-module.exports = { db, DATA_DIR, getSetting, setSetting, tasks, downloads, runs, fingerprints, failures, hidden };
+module.exports = { db, DATA_DIR, getSetting, setSetting, tasks, downloads, runs, fingerprints, failures, hidden, chatState };
