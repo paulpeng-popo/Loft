@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS downloads (
 );
 CREATE INDEX IF NOT EXISTS idx_dl_key ON downloads (file_key);
 CREATE INDEX IF NOT EXISTS idx_dl_sha ON downloads (sha256);
+CREATE TABLE IF NOT EXISTS fingerprints (
+    file_key TEXT PRIMARY KEY,
+    kind TEXT,
+    phash TEXT,
+    aspect REAL,
+    w INTEGER,
+    h INTEGER,
+    duration INTEGER,
+    size INTEGER,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS failures (
     chat_id TEXT NOT NULL,
     msg_id INTEGER NOT NULL,
@@ -187,6 +198,19 @@ const runs = {
     prune: () => db.prepare('DELETE FROM runs WHERE id <= (SELECT id FROM runs ORDER BY id DESC LIMIT 1 OFFSET 1000)').run(),
 };
 
+const fingerprints = {
+    get: (key) => db.prepare('SELECT * FROM fingerprints WHERE file_key = ?').get(key),
+    put(fp) {
+        db.prepare(`INSERT OR REPLACE INTO fingerprints (file_key, kind, phash, aspect, w, h, duration, size, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .run(fp.key, fp.kind, fp.phash, fp.aspect, fp.w, fp.h, fp.duration, fp.size, now());
+    },
+    // Fingerprints of downloaded files (for duplicate checks)
+    downloaded: () => db.prepare(`SELECT d.id AS download_id, d.path, d.chat_id, d.chat_title, d.msg_id, f.*
+        FROM downloads d JOIN fingerprints f ON f.file_key = d.file_key
+        WHERE d.path NOT LIKE '(%'`).all(),
+};
+
 // Download failures: one row per message, with the failure count and the last error
 const failures = {
     add(f) {
@@ -206,4 +230,4 @@ const failures = {
 // Runs that were still going when the app was last closed
 db.prepare("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'").run(now());
 
-module.exports = { db, DATA_DIR, getSetting, setSetting, tasks, downloads, runs, failures };
+module.exports = { db, DATA_DIR, getSetting, setSetting, tasks, downloads, runs, fingerprints, failures };

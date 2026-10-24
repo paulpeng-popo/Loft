@@ -115,6 +115,7 @@ app.get('/api/chat/:chat/avatar', sendImage((req) => browse.avatar(req.params.ch
 app.get('/api/chat/:chat/media', wrap((req) => browse.media(req.params.chat, {
     ...req.query, notDownloaded: bool(req.query.notDownloaded),
 })));
+app.post('/api/chat/:chat/check', wrap((req) => browse.check(req.params.chat, (req.body.ids || []).map(Number))));
 // After downloads, update the media wall's "downloaded / duplicate" marks: items = [{ id, key }]
 app.post('/api/chat/:chat/status', wrap((req) => {
     const out = {};

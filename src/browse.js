@@ -276,6 +276,31 @@ async function media(chatId, opts = {}) {
     return { items, cursor: done && items.length < limit ? null : cursor, scanned };
 }
 
+/**
+ * Fills in "looks the same" checks in the background (needs small thumbnails for fingerprints, so it stays out of media() to keep the first render fast).
+ * Returns { [msgId]: { status: 'similar', dupOf } }
+ */
+async function check(chatId, ids) {
+    const similar = require('./similar');
+    const out = {};
+    await Promise.all(ids.slice(0, 120).map(async (id) => {
+        try {
+            const { msg, key } = await getMessage(chatId, id);
+            if (!similar.kindOf(msg)) return;
+            const fp = await similar.fingerprint(msg, key);
+            if (!fp) return;
+            if (statusOf(key, msg, fp.key).status) return;
+            const hit = similar.findDownloaded(fp, 'normal');
+            if (hit && !(hit.row.chat_id === key && hit.row.msg_id === msg.id)) {
+                out[id] = { status: 'similar', dupOf: { chat: hit.row.chat_title, path: hit.row.path, why: hit.exact ? '內容相同' : '看起來一樣' } };
+            }
+        } catch {
+            // One failure doesn't affect the others
+        }
+    }));
+    return out;
+}
+
 async function topics(chatId) {
     const { entity } = await tg.resolveChat(chatId);
     if (!entity.forum) return [];
@@ -320,7 +345,7 @@ async function folders() {
     }));
 }
 
-// Pick the largest thumbnail type no wider than maxW. small (~320px) for the media wall; large (~800px) for the viewer
+// Pick the largest thumbnail type no wider than maxW. small (~320px) for the media wall and similarity checks; large (~800px) for the viewer
 const THUMB_MAX = { small: 400, large: 800 };
 function pickThumbType(sizes, size = 'large') {
     const maxW = THUMB_MAX[size] || 800;
@@ -341,7 +366,7 @@ async function thumb(chatId, msgId, size = 'large') {
     return thumbForMsg(msg, key, size);
 }
 
-// Get a thumbnail straight from the message object
+// Get a thumbnail straight from the message object (the media wall and similarity checks share one cache)
 async function thumbForMsg(msg, key, size = 'large') {
     const file = thumbPath(key, msg.id, size);
     if (fs.existsSync(file)) return file;
@@ -400,5 +425,5 @@ function clearCache(which = ['thumb', 'file']) {
 }
 
 module.exports = {
-    avatar, media, topics, folders, thumb, thumbForMsg, original, getMessage, remember, cacheSize, clearCache, kindOf, item,
+    avatar, media, check, topics, folders, thumb, thumbForMsg, original, getMessage, remember, cacheSize, clearCache, kindOf, item,
 };

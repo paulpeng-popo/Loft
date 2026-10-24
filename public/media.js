@@ -158,6 +158,7 @@ async function loadMore() {
         appendTiles(added);
         cursor = r.cursor;
         $('#m-end').textContent = cursor === null ? (items.length ? `共 ${items.length} 個` : '這裡沒有符合條件的媒體') : '';
+        checkSimilar(chat, added);
     } finally {
         if (loading === seq) loading = false;
     }
@@ -203,6 +204,22 @@ function appendTiles(list) {
 function updateTile(it) {
     const el = $(`#m-grid .tile[data-id="${it.id}"]`);
     if (el) el.outerHTML = tileHtml(it);
+}
+
+// Fill in "looks the same" (duplicate) in the background, without slowing the first render
+async function checkSimilar(chat, list) {
+    const ids = list.filter((it) => !it.status && it.thumb && ['photo', 'video', 'gif', 'video_note', 'image'].includes(it.kind)).map((it) => it.id);
+    for (let i = 0; i < ids.length; i += 60) {
+        const r = await api('POST', `/api/chat/${enc(chat.id)}/check`, { ids: ids.slice(i, i + 60) }).catch(() => ({}));
+        if (cur !== chat) return;
+        for (const [id, v] of Object.entries(r)) {
+            const it = items.find((x) => x.id === Number(id));
+            if (!it) continue;
+            Object.assign(it, v);
+            updateTile(it);
+        }
+        updateSelection();
+    }
 }
 
 // After downloads, update the "downloaded / duplicate" marks

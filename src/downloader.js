@@ -1,6 +1,6 @@
 // Downloads: everything goes through one queue, one job at a time.
 // Duplicate checks are built in, nothing to configure:
-//   Before download: this message already downloaded -> this Telegram file already downloaded
+//   Before download: this message already downloaded -> this Telegram file already downloaded -> looks the same (similarity fingerprint)
 //   After download: same content hash -> delete the just-downloaded temp file right away (not sent to the Recycle Bin)
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,6 +10,7 @@ const { getSetting, tasks, downloads, runs, failures } = require('./db');
 const tg = require('./tg');
 const { log, lines: logLines } = require('./log');
 const fastdl = require('./fastdl');
+const similar = require('./similar');
 
 // Types a task can pick (stickers are not media downloads)
 const MEDIA_TYPES = ['photo', 'video', 'gif', 'document', 'audio', 'voice', 'video_note'];
@@ -59,9 +60,10 @@ function mediaInfo(msg) {
 const inflightKeys = new Set(); // Telegram files being downloaded right now (duplicates within one batch are fetched only once)
 
 /**
- * Duplicate check before download. Returns { skip: reason }, or {} when it should be downloaded
+ * Duplicate check before download. Returns { skip: reason } or { fp } (fp = similarity fingerprint, saved after download for later checks)
+ * runFps: fingerprints already queued in this run, so only the first of several look-alikes in one batch is fetched
  */
-async function precheck(chatKey, msg, info, force) {
+async function precheck(chatKey, msg, info, runFps, force) {
     if (downloads.byMessage(chatKey, msg.id)) return { skip: '這則已下載過' };
     if (force) return {};
     if (info.key) {
@@ -69,7 +71,15 @@ async function precheck(chatKey, msg, info, force) {
         if (hit) return { skip: `同一個檔案已下載（${hit.chat_title || hit.chat_id} #${hit.msg_id}）` };
         if (inflightKeys.has(info.key)) return { skip: '同一個檔案正在下載' };
     }
-    return {};
+    if (!similar.kindOf(msg)) return {};
+    const fp = await similar.fingerprint(msg, chatKey).catch(() => null);
+    if (!fp) return {};
+    for (const other of runFps) {
+        if (similar.compare(fp, other.fp, 'normal').similar) return { skip: `和這次的 #${other.msgId} 看起來一樣` };
+    }
+    const hit = similar.findDownloaded(fp, 'normal');
+    if (hit) return { skip: `和已下載的 ${hit.row.path} ${hit.exact ? '相同' : '看起來一樣'}` };
+    return { fp };
 }
 
 const sanitize = (s) => String(s).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '').slice(0, 150) || '_';
@@ -164,7 +174,7 @@ const reservedPaths = new Set();
  * Downloads one message: returns true on success (including skipped as a duplicate), false on failure.
  * track = false: don't update the progress bar at the top
  */
-async function downloadOne({ task, msg, info, key, chatTitle, dir, stats, track = true }) {
+async function downloadOne({ task, msg, info, key, chatTitle, dir, stats, fp = null, track = true }) {
     let target = uniquePath(path.join(dir, await nameFor(task && task.name_template, msg, info, key, chatTitle)));
     while (reservedPaths.has(target)) target = uniquePath(target.replace(/(\.[^.\\/]*)?$/, ' (+)$1'));
     reservedPaths.add(target);
@@ -193,9 +203,12 @@ async function downloadOne({ task, msg, info, key, chatTitle, dir, stats, track 
                     return true;
                 }
                 fs.renameSync(part, target);
-                record(target, hash);
+                const downloadId = record(target, hash);
                 stats.downloaded++;
                 log(`下載 #${msg.id} → ${target}`);
+                // Record a fingerprint for every downloaded image / video so "looks the same" can match later
+                if (!fp && similar.kindOf(msg)) fp = await similar.fingerprint(msg, key).catch(() => null);
+                if (fp) similar.addDownloaded(fp, { download_id: downloadId, path: target, chat_id: key, chat_title: chatTitle, msg_id: msg.id });
                 return true;
             } catch (e) {
                 fs.rmSync(part, { force: true });
@@ -228,6 +241,7 @@ async function runBatch(job) {
     state.running = { taskId: job.taskId || null, taskName: job.label, runId, ...stats, active: new Map() };
     let status = 'ok';
     const files = fastdl.pool(fastdl.fileWorkers);
+    const runFps = [];
     for (const it of job.items) {
         if (state.cancel) {
             status = 'cancelled';
@@ -242,14 +256,17 @@ async function runBatch(job) {
                 if (!info) return;
                 const owner = it.taskId ? tasks.get(it.taskId) : null;
                 const chatTitle = (owner && owner.chat_title) || title;
-                const pre = await precheck(key, msg, info, !!job.force);
+                const pre = await precheck(key, msg, info, runFps, !!job.force);
                 if (pre.skip) {
                     stats.skipped++;
                     failures.remove(key, msg.id);
                     if (!/已下載過/.test(pre.skip)) log(`略過 #${msg.id}：${pre.skip}`);
                     return;
                 }
-                await downloadOne({ task: owner, msg, info, key, chatTitle, dir: destDir(owner, chatTitle), stats });
+                const entry = pre.fp ? { fp: pre.fp, msgId: msg.id } : null;
+                if (entry) runFps.push(entry);
+                await downloadOne({ task: owner, msg, info, key, chatTitle, dir: destDir(owner, chatTitle), stats, fp: pre.fp });
+                if (entry) runFps.splice(runFps.indexOf(entry), 1);
             } catch (e) {
                 stats.failed++;
                 log(`下載 #${it.id} 失敗：${e.errorMessage || e.message}`);

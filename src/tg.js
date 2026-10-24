@@ -17,6 +17,7 @@ let dialogCache = { at: 0, list: [], entities: new Map() };
 // Chats seen before but not in the chat list (e.g. public channels)
 const extraEntities = new Map();
 
+const peerKey = (peer) => utils.getPeerId(peer).toString();
 const selfId = () => (me ? me.id.toString() : null);
 
 // Topic id of a message in a forum group (the General topic is 1)
@@ -262,5 +263,5 @@ async function resolveChat(chatId) {
 
 module.exports = {
     getClient, resetClient, authStatus, sendCode, signIn, signInPassword, logout,
-    listDialogs, resolveChat, rememberEntity, selfId, forumTopics, topicOf,
+    listDialogs, resolveChat, rememberEntity, peerKey, selfId, forumTopics, topicOf,
 };
