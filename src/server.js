@@ -5,7 +5,7 @@ const express = require('express');
 const { getSetting, setSetting } = require('./db');
 const fastdl = require('./fastdl');
 const tg = require('./tg');
-const { log } = require('./log');
+const downloader = require('./downloader');
 const browse = require('./browse');
 
 const PORT = Number(process.env.PORT) || 8787;
@@ -25,20 +25,31 @@ const wrap = (fn) => (req, res) => {
 };
 
 // ---- Status and settings ----
-app.get('/api/status', wrap(async () => ({ auth: await tg.authStatus() })));
+app.get('/api/status', wrap(async () => ({ auth: await tg.authStatus(), ...downloader.snapshot() })));
 
 app.get('/api/settings', wrap(() => ({
     api_id: getSetting('api_id', ''),
     has_api_hash: !!getSetting('api_hash'),
+    download_root: getSetting('download_root', ''),
+    name_template: getSetting('name_template', ''),
+    dl_part_workers: getSetting('dl_part_workers', '4'),
+    dl_file_workers: getSetting('dl_file_workers', '2'),
+    dl_speed_limit: getSetting('dl_speed_limit', '0'),
+    media_types: downloader.MEDIA_TYPES,
 })));
 
 app.put('/api/settings', wrap(async (req) => {
     const b = req.body;
+    if (b.dl_part_workers !== undefined) setSetting('dl_part_workers', Math.min(8, Math.max(1, Number(b.dl_part_workers) || 4)));
+    if (b.dl_file_workers !== undefined) setSetting('dl_file_workers', Math.min(5, Math.max(1, Number(b.dl_file_workers) || 2)));
+    if (b.dl_speed_limit !== undefined) setSetting('dl_speed_limit', Math.min(1000, Math.max(0, Number(b.dl_speed_limit) || 0)));
+    if (b.name_template !== undefined) setSetting('name_template', String(b.name_template).trim());
+    if (b.download_root !== undefined) setSetting('download_root', String(b.download_root).trim());
     const credsChanged = (b.api_id !== undefined && String(b.api_id) !== getSetting('api_id', '')) || !!b.api_hash;
     if (b.api_id !== undefined) setSetting('api_id', String(b.api_id).trim());
     if (b.api_hash) setSetting('api_hash', String(b.api_hash).trim());
     if (credsChanged) await tg.resetClient();
-    log(credsChanged ? '設定已更新（API 憑證變更，重新連線）' : '設定已更新');
+    downloader.log(credsChanged ? '設定已更新（API 憑證變更，重新連線）' : '設定已更新');
 }));
 
 // ---- Login ----
@@ -131,11 +142,20 @@ app.get('/api/chat/:chat/stream/:msg', async (req, res) => {
     }
 });
 
+// ---- Downloads ----
+// Selected on the media wall (jumps the queue); force = download anyway, skips duplicate checks
+app.post('/api/download', wrap((req) => ({
+    queued: downloader.enqueueBatch((req.body.items || []).map((x) => ({ chat: String(x.chat), id: Number(x.id) })),
+        req.body.label || '下載選取的媒體', { force: !!req.body.force }),
+})));
+
 app.get('/api/cache', wrap(() => browse.cacheSize()));
 app.delete('/api/cache', wrap(() => {
     browse.clearCache(['thumb', 'file', 'avatar']);
-    log('已清除快取');
+    downloader.log('已清除快取');
 }));
+
+app.post('/api/stop', wrap(() => downloader.stop(true)));
 
 /**
  * Starts the web server, and only connects to Telegram once that succeeds. Returns { url }.
@@ -145,10 +165,10 @@ function start() {
     return new Promise((resolve, reject) => {
         const httpServer = app.listen(PORT, '127.0.0.1', () => {
             const url = `http://127.0.0.1:${PORT}`;
-            log(`Web 介面：${url}`);
+            downloader.log(`Web 介面：${url}`);
             // If there is a login, connect right away
             tg.authStatus().then((s) => {
-                log(s.authorized ? `已登入：${s.user.name}` : '尚未登入 Telegram');
+                downloader.log(s.authorized ? `已登入：${s.user.name}` : '尚未登入 Telegram');
             });
             resolve({ url });
         });

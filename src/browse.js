@@ -41,7 +41,7 @@ function once(key, fn) {
 
 const safeId = (s) => String(s).replace(/[^\w-]/g, '_');
 
-// Message object cache: thumbnails and originals need the original file reference
+// Message object cache: thumbnails, originals and downloads all need the original file reference
 const msgCache = new Map();
 function remember(chatKey, msg) {
     msgCache.set(`${chatKey}:${msg.id}`, msg);

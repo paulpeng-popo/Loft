@@ -178,7 +178,7 @@ async function loadSettings() {
 }
 $('#btn-save-api').addEventListener('click', guard(async () => {
     const credsChanged = $('#set-api-id').value.trim() !== String(settings.api_id || '') || !!$('#set-api-hash').value;
-    if (credsChanged && lastAuth && !(await confirmBox('你正在更換 API 憑證。\n儲存後會中斷目前的 Telegram 連線，可能需要重新登入。確定？', { ok: '儲存', danger: true }))) return;
+    if (credsChanged && lastAuth && !(await confirmBox('你正在更換 API 憑證。\n儲存後會中斷目前的 Telegram 連線，正在跑的下載會失敗，可能需要重新登入。確定？', { ok: '儲存', danger: true }))) return;
     await api('PUT', '/api/settings', { api_id: $('#set-api-id').value, api_hash: $('#set-api-hash').value || undefined });
     $('#set-api-hash').value = '';
     await loadSettings();

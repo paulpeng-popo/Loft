@@ -18,6 +18,7 @@ function settingInt(key, fallback, min, max) {
 const partWorkers = () => settingInt('dl_part_workers', 4, 1, 8);
 // Download speed limit (MB/s, 0 = unlimited); only applies to downloads, not to thumbnails or streaming while browsing
 const speedLimit = () => Math.max(0, parseFloat(getSetting('dl_speed_limit', '0')) || 0);
+const fileWorkers = () => settingInt('dl_file_workers', 2, 1, 5);
 
 function documentLocation(msg) {
     const m = msg.media;
@@ -190,4 +191,19 @@ async function download(msg, outFile, { onProgress, noLimit = false } = {}) {
     return outFile;
 }
 
-module.exports = { download, readRange, documentLocation, partWorkers, PART, throttle };
+// A simple pool that runs several jobs at once
+function pool(limit) {
+    const running = new Set();
+    return {
+        async add(fn) {
+            while (running.size >= limit()) await Promise.race(running);
+            const p = Promise.resolve().then(fn).finally(() => running.delete(p));
+            running.add(p);
+            return p;
+        },
+        size: () => running.size,
+        drain: () => Promise.allSettled([...running]),
+    };
+}
+
+module.exports = { download, readRange, documentLocation, pool, fileWorkers, partWorkers, PART, throttle };
