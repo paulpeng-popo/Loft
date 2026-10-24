@@ -10,6 +10,7 @@ const CACHE_DIR = path.join(DATA_DIR, 'cache');
 const DIRS = {
     avatar: path.join(CACHE_DIR, 'avatars'),
     thumb: path.join(CACHE_DIR, 'thumbs'),
+    file: path.join(CACHE_DIR, 'files'),
 };
 for (const d of Object.values(DIRS)) fs.mkdirSync(d, { recursive: true });
 
@@ -40,7 +41,7 @@ function once(key, fn) {
 
 const safeId = (s) => String(s).replace(/[^\w-]/g, '_');
 
-// Message object cache: thumbnails need the original file reference
+// Message object cache: thumbnails and originals need the original file reference
 const msgCache = new Map();
 function remember(chatKey, msg) {
     msgCache.set(`${chatKey}:${msg.id}`, msg);
@@ -363,6 +364,41 @@ async function thumbForMsg(msg, key, size = 'large') {
     }));
 }
 
+// Originals for the viewer (kept in the cache, not counted as downloads, not speed limited)
+async function original(chatId, msgId) {
+    const { msg, key } = await getMessage(chatId, msgId);
+    const f = msg.file;
+    const ext = (f && f.name && path.extname(f.name)) || (msg.photo ? '.jpg' : (f && f.ext) || '');
+    const file = path.join(DIRS.file, `${safeId(key)}_${Number(msgId)}${ext}`);
+    if (fs.existsSync(file)) return { file, name: (f && f.name) || path.basename(file) };
+    await once(file, async () => {
+        const part = `${file}.part`;
+        await require('./fastdl').download(msg, part, { noLimit: true });
+        fs.renameSync(part, file);
+    });
+    return { file, name: (f && f.name) || path.basename(file) };
+}
+
+function cacheSize() {
+    let bytes = 0;
+    let files = 0;
+    for (const d of Object.values(DIRS)) {
+        for (const n of fs.readdirSync(d)) {
+            bytes += fs.statSync(path.join(d, n)).size;
+            files++;
+        }
+    }
+    return { bytes, files };
+}
+
+function clearCache(which = ['thumb', 'file']) {
+    for (const k of which) {
+        const d = DIRS[k];
+        if (!d) continue;
+        for (const n of fs.readdirSync(d)) fs.rmSync(path.join(d, n), { force: true });
+    }
+}
+
 module.exports = {
-    avatar, media, topics, folders, thumb, thumbForMsg, getMessage, remember, kindOf, item,
+    avatar, media, topics, folders, thumb, thumbForMsg, original, getMessage, remember, cacheSize, clearCache, kindOf, item,
 };

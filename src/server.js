@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const { getSetting, setSetting } = require('./db');
+const fastdl = require('./fastdl');
 const tg = require('./tg');
 const { log } = require('./log');
 const browse = require('./browse');
@@ -86,6 +87,55 @@ app.get('/api/chat/:chat/media', wrap((req) => browse.media(req.params.chat, {
 })));
 app.get('/api/chat/:chat/topics', wrap((req) => browse.topics(req.params.chat)));
 app.get('/api/chat/:chat/thumb/:msg', sendImage((req) => browse.thumb(req.params.chat, req.params.msg, req.query.s === 'small' ? 'small' : 'large')));
+app.get('/api/chat/:chat/file/:msg', (req, res) => {
+    browse.original(req.params.chat, req.params.msg)
+        .then(({ file, name }) => {
+            if (req.query.save === '1') return res.download(file, name);
+            res.sendFile(file);
+        })
+        .catch((e) => res.status(400).json({ error: e.errorMessage || e.message }));
+});
+// Streaming: only fetch the range the browser asks for, without waiting for the whole file (1MB per response)
+const STREAM_CHUNK = 1024 * 1024;
+app.get('/api/chat/:chat/stream/:msg', async (req, res) => {
+    try {
+        const { msg } = await browse.getMessage(req.params.chat, req.params.msg);
+        const info = fastdl.documentLocation(msg);
+        if (!info) return res.redirect(`/api/chat/${encodeURIComponent(req.params.chat)}/file/${req.params.msg}`);
+        const size = info.size;
+        const type = msg.document.mimeType || 'application/octet-stream';
+        const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
+        if (!m) {
+            res.status(200).set({ 'Content-Type': type, 'Content-Length': size, 'Accept-Ranges': 'bytes' });
+            for (let pos = 0; pos < size && !res.destroyed; pos += STREAM_CHUNK) {
+                const buf = await fastdl.readRange(msg, pos, Math.min(size, pos + STREAM_CHUNK) - 1);
+                if (!res.write(buf)) await new Promise((r) => res.once('drain', r));
+            }
+            return res.end();
+        }
+        const start = m[1] === '' ? Math.max(0, size - Number(m[2])) : Number(m[1]);
+        let end = m[1] !== '' && m[2] !== '' ? Number(m[2]) : size - 1;
+        end = Math.min(end, size - 1, start + STREAM_CHUNK - 1);
+        if (start >= size || start > end) return res.status(416).set('Content-Range', `bytes */${size}`).end();
+        const buf = await fastdl.readRange(msg, start, end);
+        res.status(206).set({
+            'Content-Type': type,
+            'Content-Length': buf.length,
+            'Content-Range': `bytes ${start}-${start + buf.length - 1}/${size}`,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'private, max-age=3600',
+        }).end(buf);
+    } catch (e) {
+        if (!res.headersSent) res.status(400).json({ error: e.errorMessage || e.message });
+        else res.destroy();
+    }
+});
+
+app.get('/api/cache', wrap(() => browse.cacheSize()));
+app.delete('/api/cache', wrap(() => {
+    browse.clearCache(['thumb', 'file', 'avatar']);
+    log('已清除快取');
+}));
 
 /**
  * Starts the web server, and only connects to Telegram once that succeeds. Returns { url }.

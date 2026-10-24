@@ -139,6 +139,9 @@ function showTab(name) {
     document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('hidden', s.id !== `tab-${name}`));
     if (name === 'media' && typeof loadChats === 'function') guard(loadChats)();
+    if (name === 'settings') {
+        guard(loadCacheSize)();
+    }
     try { localStorage.setItem('tab', name); } catch { /* private mode */ }
 }
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -214,6 +217,17 @@ $('#btn-logout').addEventListener('click', guard(async () => {
     if (!(await confirmBox('確定登出？', { ok: '登出', danger: true }))) return;
     await api('POST', '/api/auth/logout');
     pollStatus();
+}));
+
+async function loadCacheSize() {
+    const r = await api('GET', '/api/cache');
+    $('#cache-size').textContent = `${fmtSize(r.bytes)}（${r.files} 個檔案）`;
+}
+$('#btn-clear-cache').addEventListener('click', guard(async () => {
+    if (!(await confirmBox('清除縮圖和預覽的快取？已下載的檔案不受影響，之後看媒體牆時會重新抓縮圖。', { ok: '清除', danger: true }))) return;
+    await api('DELETE', '/api/cache');
+    toast('快取已清除');
+    loadCacheSize();
 }));
 
 // ---- Startup ----
