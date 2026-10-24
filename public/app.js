@@ -247,8 +247,12 @@ $('#btn-save-dl').addEventListener('click', guard(async () => {
     toast('下載設定已儲存');
 }));
 $('#btn-pick-root').addEventListener('click', guard(async () => {
-    toast('已開啟選擇資料夾的視窗（可能在瀏覽器後面）');
-    const p = (await api('POST', '/api/pick-folder')).path;
+    let p;
+    if (window.loft && window.loft.isApp) p = await window.loft.pickFolder('選擇下載資料夾');
+    else {
+        toast('已開啟選擇資料夾的視窗（可能在瀏覽器後面）');
+        p = (await api('POST', '/api/pick-folder')).path;
+    }
     if (p) $('#set-root').value = p;
 }));
 $('#btn-save-api').addEventListener('click', guard(async () => {
@@ -542,13 +546,14 @@ async function loadDownloads() {
     $('#dl-page').textContent = `${dlPage} / ${pages}`;
     $('#dl-prev').disabled = dlPage <= 1;
     $('#dl-next').disabled = dlPage >= pages;
+    const canReveal = window.loft && window.loft.isApp;
     $('#dl-rows').innerHTML = r.rows.map((d) => `<tr>
         <td title="${esc(fmtTime(d.downloaded_at))}">${shortStamp(d.downloaded_at)}</td>
         <td title="${esc(d.chat_title || d.chat_id)}">${esc(d.chat_title || d.chat_id)}</td>
         <td class="r">${d.msg_id}</td>
         <td>${TYPE_LABELS[d.media_type] || esc(d.media_type)}</td><td class="r">${fmtSize(d.size)}</td>
         <td class="path" title="${esc(d.path)}">${esc(d.path)}</td>
-        <td class="actions">${iconBtn('close', '忘記這筆紀錄（只刪紀錄、不刪檔案；之後可能會重新下載）', `data-forget="${d.id}"`)}</td></tr>`).join('')
+        <td class="actions">${canReveal ? iconBtn('folder', '在檔案總管中顯示', `data-reveal="${esc(d.path)}"`) : ''}${iconBtn('close', '忘記這筆紀錄（只刪紀錄、不刪檔案；之後可能會重新下載）', `data-forget="${d.id}"`)}</td></tr>`).join('')
         || '<tr><td colspan="7" class="muted" style="text-align:center">沒有下載紀錄</td></tr>';
 }
 let dlTimer;
@@ -559,6 +564,7 @@ $('#dl-next').addEventListener('click', () => { dlPage++; guard(loadDownloads)()
 $('#dl-rows').addEventListener('click', guard(async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.dataset.reveal && window.loft) return window.loft.showInFolder(b.dataset.reveal);
     if (!b.dataset.forget) return;
     await api('DELETE', `/api/downloads/${b.dataset.forget}`);
     loadDownloads();
@@ -651,6 +657,28 @@ $('#btn-clear-runs').addEventListener('click', guard(async () => {
     toast(`已清除 ${r.removed} 筆執行紀錄`);
     loadRuns();
 }));
+
+// ---- Desktop app (Electron) only: window.loft comes from electron/preload.js ----
+const desktop = window.loft && window.loft.isApp ? window.loft : null;
+if (desktop) {
+    $('#desktop-card').classList.remove('hidden');
+    desktop.info().then((i) => {
+        $('#desktop-data').textContent = i.dataDir;
+        $('#desktop-version').textContent = `Loft 桌面版 ${i.version}`;
+        $('#autostart-row').classList.toggle('hidden', !i.autoStartSupported);
+        $('#set-autostart').checked = i.autoStart;
+    });
+    $('#set-autostart').addEventListener('change', guard(async (e) => {
+        const on = await desktop.setAutoStart(e.target.checked);
+        e.target.checked = on;
+        toast(on ? '已設定開機自動執行' : '已取消開機自動執行');
+    }));
+    $('#btn-open-data').addEventListener('click', () => desktop.openData());
+    $('#btn-test-notify').addEventListener('click', guard(async () => {
+        await api('POST', '/api/notifications/test');
+        toast('已送出，幾秒內應該會跳出通知');
+    }));
+}
 
 // ---- Startup ----
 window.addEventListener('DOMContentLoaded', () => {

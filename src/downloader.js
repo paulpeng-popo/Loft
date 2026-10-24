@@ -396,6 +396,7 @@ async function runTask(taskId, trigger) {
     runs.finish(runId, { status, ...stats, message: message || (adhoc ? `一次性：${task.name}` : '') });
     if (!adhoc) tasks.setResult(taskId, `${status}｜${summary}${message ? `｜${message}` : ''}`);
     log(`結束「${task.name}」：${status}，${summary}`);
+    notifyDone(task.name, trigger, stats, status, message);
 }
 
 /**
@@ -452,6 +453,21 @@ async function runBatch(job) {
     if (stats.failed && status === 'ok') status = 'partial';
     runs.finish(runId, { status, ...stats, message: job.label });
     log(`結束${job.label}：下載 ${stats.downloaded}、略過重複 ${stats.skipped}、失敗 ${stats.failed}`);
+    notifyDone(job.label, job.trigger || 'batch', stats, status, '');
+}
+
+// Notify when downloads finish or fail (shown by the desktop app; not while its window is in front)
+function notifyDone(name, trigger, stats, status, message) {
+    if (!stats.downloaded && !stats.failed && status !== 'error') return;
+    const parts = [];
+    if (stats.downloaded) parts.push(`下載 ${stats.downloaded} 個`);
+    if (stats.skipped) parts.push(`略過重複 ${stats.skipped} 個`);
+    if (stats.failed) parts.push(`失敗 ${stats.failed} 個`);
+    require('./notify').push({
+        title: status === 'error' ? `「${name}」出錯了` : stats.failed ? `「${name}」有下載失敗` : `「${name}」下載完成`,
+        body: status === 'error' ? message : parts.join('、'),
+        kind: stats.failed || status === 'error' ? 'fail' : 'done',
+    });
 }
 
 // ---- Queue ----

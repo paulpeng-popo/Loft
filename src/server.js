@@ -5,6 +5,7 @@ const express = require('express');
 const { getSetting, setSetting, tasks, downloads, runs, failures } = require('./db');
 const similar = require('./similar');
 const fastdl = require('./fastdl');
+const notify = require('./notify');
 const hidden = require('./hidden');
 const tg = require('./tg');
 const downloader = require('./downloader');
@@ -62,10 +63,10 @@ app.put('/api/settings', wrap(async (req) => {
     downloader.log(credsChanged ? '設定已更新（API 憑證變更，重新連線）' : '設定已更新');
 }));
 
-// Open the Windows folder picker
+// Open the Windows folder picker (only needed when used from a browser; the desktop app has its own dialog)
 app.post('/api/pick-folder', wrap(() => new Promise((resolve, reject) => {
     if (process.platform !== 'win32') {
-        reject(new Error('這個系統只能直接貼上路徑'));
+        reject(new Error('瀏覽器版只能直接貼上路徑；桌面版可以用選擇資料夾的視窗'));
         return;
     }
     const ps = [
@@ -210,7 +211,9 @@ app.post('/api/download', wrap((req) => ({
 // The media wall's download-all-matches button: one run with the current filters (not saved as a task)
 app.post('/api/download-all', wrap((req) => ({ queued: downloader.enqueueAdhoc(validateTask(req.body)) })));
 
-// ---- Live updates ----
+// ---- Notifications, live updates ----
+app.get('/api/notifications', wrap((req) => notify.since(req.query.since)));
+app.post('/api/notifications/test', wrap(() => notify.test()));
 app.post('/api/presence', wrap((req) => watch.setPresence(req.body)));
 // Live updates (Server-Sent Events): new media and badge counts
 app.get('/api/events', (req, res) => {
@@ -303,7 +306,7 @@ function start() {
 
 module.exports = { start };
 
-// Started directly (npm start): start right away
+// CLI version (npm start): start right away
 if (require.main === module) {
     start().catch((e) => {
         console.error(`${e.message} (not starting this one)`);

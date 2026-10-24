@@ -455,9 +455,11 @@ $('#m-grid').addEventListener('contextmenu', (e) => {
     const entries = [];
     if (sel) entries.push({ icon: 'download', label: `下載選取的 ${sel.length} 個`, run: () => $('#m-sel-dl').click() });
     entries.push({ icon: 'eye', label: '預覽', run: () => openViewer(items.indexOf(it)) });
-    if (it.status === 'dup' || it.status === 'similar') {
+    if (it.status === 'done') {
+        if (desktop) entries.push({ icon: 'folder', label: '在資料夾中顯示', run: () => desktop.showInFolder(it.path) });
+    } else if (it.status === 'dup' || it.status === 'similar') {
         entries.push({ icon: 'download', label: '仍然下載（不檢查重複）', run: () => downloadItems([it], { force: true }) });
-    } else if (it.status !== 'done') {
+    } else {
         entries.push({ icon: 'download', label: '下載', run: () => downloadItems([it]) });
     }
     entries.push({ icon: 'select', label: selected.has(it.id) ? '取消選取' : '選取', run: () => { setSelected(it.id, !selected.has(it.id)); updateSelection(); } });

@@ -1,3 +1,5 @@
 node_modules/
 # Login session, API credentials, settings, caches and logs live in data: never commit it
 data/
+# Build output
+dist/

@@ -240,6 +240,18 @@
             <p class="muted">登入資料只存在本機資料夾的 <code>session.txt</code>。網頁只聽 127.0.0.1，不對外開放。</p>
         </div>
 
+        <div class="card hidden" id="desktop-card">
+            <h2>桌面版</h2>
+            <div id="autostart-row" class="hidden">
+                <label class="check"><input type="checkbox" id="set-autostart"> 開機自動執行（只放在系統列，不開視窗）</label>
+                <p class="muted">打勾會在系統的啟動項目加一筆「Loft」，取消勾選就刪掉。要刪除 Loft 前，請先取消勾選，才不會留下這一筆。</p>
+            </div>
+            <p class="muted">關掉視窗會縮到系統列（macOS 是上方的選單列），排程和自動下載照樣跑；下載完成或失敗會跳通知。要完全結束請在系統列圖示的選單按「結束」。</p>
+            <p><button id="btn-test-notify" class="small">傳送測試通知</button></p>
+            <p>資料夾：<code id="desktop-data"></code> <button id="btn-open-data" class="small">開啟</button></p>
+            <p class="muted" id="desktop-version"></p>
+        </div>
+
         <div class="card">
             <h2>快取</h2>
             <p class="muted">媒體牆看過的縮圖、預覽過的原檔會暫存在 <code>data\cache</code>。目前：<span id="cache-size">-</span></p>
