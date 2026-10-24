@@ -140,6 +140,23 @@
     <div class="actions" id="ask-buttons"></div>
 </dialog>
 
+<!-- Viewer -->
+<dialog id="viewer">
+    <div class="viewer-tools">
+        <span id="viewer-count" class="v-count"></span>
+        <span id="viewer-name" class="v-name"></span>
+        <span class="spacer"></span>
+        <button id="viewer-zoom" class="v-btn" data-icon="zoom" title="縮放（Z）"></button>
+        <button id="viewer-play" class="v-btn" data-icon="play" title="幻燈片（空白鍵）"></button>
+        <button id="viewer-close" class="v-btn" data-icon="close" title="關閉（Esc）"></button>
+    </div>
+    <button id="viewer-prev" class="v-nav prev" data-icon="left" title="上一個（←）"></button>
+    <div id="viewer-body"></div>
+    <button id="viewer-next" class="v-nav next" data-icon="right" title="下一個（→）"></button>
+    <div id="viewer-status" class="v-status"></div>
+    <div id="viewer-caption" class="v-caption hidden"></div>
+</dialog>
+
 <div id="toast"></div>
 <script src="icons.js"></script>
 <script src="app.js"></script>

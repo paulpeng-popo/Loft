@@ -1,4 +1,4 @@
-// Media (main screen): group list on the left, media wall on the right.
+// Media (main screen): group list on the left, media wall on the right, viewer.
 const AVATAR_COLORS = ['#e17076', '#7bc862', '#e5ca77', '#65aadd', '#a695e7', '#ee7aae', '#6ec9cb', '#faa774'];
 
 let chats = [];
@@ -213,3 +213,115 @@ $('#m-wall').addEventListener('scroll', () => {
     const w = $('#m-wall');
     if (w.scrollTop + w.clientHeight >= w.scrollHeight - 600) guard(loadMore)();
 });
+
+$('#m-grid').addEventListener('click', (e) => {
+    const tile = e.target.closest('.tile[data-id]');
+    if (!tile) return;
+    const id = Number(tile.dataset.id);
+    openViewer(items.findIndex((x) => x.id === id));
+});
+
+// =====================================================================
+// Viewer
+// =====================================================================
+let vIndex = -1;
+let vTimer = null;
+const isVisual = (it) => ['photo', 'image'].includes(it.kind);
+const isPlayable = (it) => ['video', 'gif', 'video_note', 'audio', 'voice'].includes(it.kind);
+
+function openViewer(i) {
+    if (i < 0 || !items[i]) return;
+    vIndex = i;
+    if (!$('#viewer').open) $('#viewer').showModal();
+    renderViewer();
+}
+function renderViewer() {
+    const it = items[vIndex];
+    if (!it) return;
+    const body = $('#viewer-body');
+    body.classList.remove('zoomed');
+    const base = `/api/chat/${enc(it.chat)}`;
+    if (isVisual(it)) {
+        // Show the enlarged thumbnail first and swap in the original once loaded
+        body.innerHTML = `<img id="v-img" src="${base}/thumb/${it.id}" alt="">`;
+        const full = new Image();
+        full.onload = () => { if (items[vIndex] === it && $('#v-img')) $('#v-img').src = full.src; };
+        full.src = `${base}/file/${it.id}`;
+    } else if (isPlayable(it)) {
+        const audio = it.kind === 'audio' || it.kind === 'voice';
+        const loop = it.kind === 'gif' ? ' loop muted' : '';
+        body.innerHTML = audio
+            ? `<div class="v-file">${ico('music')}<p>${esc(it.title || it.name || '音訊')}</p><audio src="${base}/stream/${it.id}" controls autoplay></audio></div>`
+            : `<video src="${base}/stream/${it.id}" controls autoplay${loop} playsinline></video>`;
+    } else {
+        body.innerHTML = `<div class="v-file">${ico('file')}<p>${esc(it.name || '檔案')}</p><p class="muted">${fmtSize(it.size)}</p></div>`;
+    }
+    $('#viewer-count').textContent = `${vIndex + 1} / ${items.length}${cursor !== null ? '+' : ''}`;
+    $('#viewer-name').textContent = [shortStamp(it.date), it.sender, it.name].filter(Boolean).join('・');
+    $('#viewer-status').textContent = it.status === 'done' ? `已下載：${it.path}` : it.dupOf ? `重複（${it.dupOf.why}）：${it.dupOf.path}` : '';
+    $('#viewer-caption').textContent = it.caption || '';
+    $('#viewer-caption').classList.toggle('hidden', !it.caption);
+    $('#viewer-prev').disabled = vIndex <= 0;
+    $('#viewer-next').disabled = vIndex >= items.length - 1 && cursor === null;
+    // Near the last one: load the next page ahead of time
+    if (vIndex >= items.length - 5) guard(loadMore)();
+}
+async function viewerStep(d) {
+    let i = vIndex + d;
+    if (i >= items.length && cursor !== null) await loadMore();
+    i = Math.max(0, Math.min(items.length - 1, i));
+    if (i !== vIndex) {
+        vIndex = i;
+        renderViewer();
+    }
+}
+function stopSlides() {
+    clearInterval(vTimer);
+    vTimer = null;
+    $('#viewer-play').classList.remove('on');
+}
+function closeViewer() {
+    stopSlides();
+    $('#viewer-body').innerHTML = '';
+    if ($('#viewer').open) $('#viewer').close();
+    // Scroll the tile being viewed into sight
+    const it = items[vIndex];
+    const el = it && $(`#m-grid .tile[data-id="${it.id}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+}
+$('#viewer-prev').addEventListener('click', () => guard(viewerStep)(-1));
+$('#viewer-next').addEventListener('click', () => guard(viewerStep)(1));
+$('#viewer-close').addEventListener('click', closeViewer);
+$('#viewer').addEventListener('cancel', (e) => { e.preventDefault(); closeViewer(); });
+$('#viewer').addEventListener('click', (e) => {
+    // Click on the black empty area to close
+    if (e.target === $('#viewer') || e.target === $('#viewer-body')) closeViewer();
+});
+$('#viewer-zoom').addEventListener('click', () => $('#viewer-body').classList.toggle('zoomed'));
+$('#viewer-body').addEventListener('click', (e) => {
+    if (e.target.id === 'v-img') $('#viewer-body').classList.toggle('zoomed');
+});
+$('#viewer-play').addEventListener('click', () => {
+    if (vTimer) return stopSlides();
+    $('#viewer-play').classList.add('on');
+    vTimer = setInterval(() => {
+        if (vIndex >= items.length - 1 && cursor === null) return stopSlides();
+        guard(viewerStep)(1);
+    }, 3000);
+});
+document.addEventListener('keydown', (e) => {
+    if (!$('#viewer').open) return;
+    if (e.key === 'ArrowLeft') guard(viewerStep)(-1);
+    else if (e.key === 'ArrowRight') guard(viewerStep)(1);
+    else if (e.key === ' ' && !(document.activeElement && document.activeElement.tagName === 'VIDEO')) {
+        e.preventDefault();
+        $('#viewer-play').click();
+    } else if (e.key.toLowerCase() === 'z') $('#viewer-zoom').click();
+});
+// Mouse wheel: previous / next (when zoomed in, the wheel scrolls instead)
+let wheelAt = 0;
+$('#viewer').addEventListener('wheel', (e) => {
+    if ($('#viewer-body').classList.contains('zoomed') || Date.now() - wheelAt < 250) return;
+    wheelAt = Date.now();
+    guard(viewerStep)(e.deltaY > 0 ? 1 : -1);
+}, { passive: true });
