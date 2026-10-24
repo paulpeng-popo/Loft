@@ -10,6 +10,7 @@
 <header>
     <h1><span class="logo" data-icon="download"></span> Loft</h1>
     <nav>
+        <button data-tab="media" data-icon="image">媒體</button>
         <button data-tab="settings" data-icon="settings">設定</button>
     </nav>
     <div class="header-tools">
@@ -21,6 +22,35 @@
 </header>
 
 <main>
+    <!-- Media -->
+    <section id="tab-media" class="tab hidden">
+        <div class="browse">
+            <aside class="chats">
+                <div class="chats-tools">
+                    <input id="c-q" type="search" placeholder="搜尋群組、頻道">
+                    <div id="c-folders" class="folders"></div>
+                    <div class="row">
+                        <select id="c-type">
+                            <option value="">全部</option>
+                            <option value="channel">頻道</option>
+                            <option value="group">群組</option>
+                            <option value="user">私訊</option>
+                        </select>
+                        <label class="check"><input type="checkbox" id="c-archived"> 封存</label>
+                        <button id="c-refresh" class="icon" data-icon="refresh" title="重新整理列表"></button>
+                    </div>
+                </div>
+                <ul id="c-list"></ul>
+            </aside>
+            <section class="chat">
+                <div id="m-empty" class="chat-empty">
+                    <div class="big-ico" data-icon="image"></div>
+                    <h2>選一個群組或頻道</h2>
+                </div>
+            </section>
+        </div>
+    </section>
+
     <!-- Settings -->
     <section id="tab-settings" class="tab hidden">
         <div class="settings-cols">
@@ -69,5 +99,6 @@
 <div id="toast"></div>
 <script src="icons.js"></script>
 <script src="app.js"></script>
+<script src="media.js"></script>
 </body>
 </html>

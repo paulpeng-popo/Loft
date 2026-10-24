@@ -159,6 +159,7 @@ input[type=checkbox], input[type=radio] { width: auto; accent-color: var(--accen
 .badge.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, var(--line)); }
 
 main { padding: 1rem; max-width: 1320px; width: 100%; margin: 0 auto; flex: 1; min-height: 0; overflow: hidden; }
+main:has(#tab-media:not(.hidden)) { max-width: none; padding: 0; }
 .tab { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .tab > .toolbar, .tab > .pager, .tab > p { flex: none; }
 /* Settings page: the full width is the scroll area (scrollbar at the window's right edge), content centered in two columns; a normal-size window needs no scrolling */
@@ -189,8 +190,42 @@ label.check { display: flex; align-items: center; gap: .4rem; }
 #toast { position: fixed; bottom: 1.4rem; left: 50%; transform: translate(-50%, .5rem); background: var(--text); color: var(--bg); padding: .55rem 1.1rem; border-radius: 999px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; max-width: calc(100vw - 2rem); box-shadow: var(--shadow-lg); z-index: 70; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* =====================================================================
+   Media (main screen)
+   ===================================================================== */
+.browse { display: grid; grid-template-columns: minmax(17rem, 22rem) minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+.chats { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); overflow: hidden; }
+.chats-tools { padding: .6rem .6rem .4rem; display: grid; gap: .45rem; border-bottom: 1px solid var(--line); }
+.chats-tools input[type=search] { border-radius: 999px; background: var(--panel-2); border-color: transparent; padding: .45rem .9rem; }
+.chats-tools .row { align-items: center; margin: 0; font-size: .85rem; }
+.chats-tools select { flex: 1; padding: .2rem .5rem; }
+.folders { display: flex; gap: .25rem; flex-wrap: wrap; }
+.folders button { border: none; background: none; border-radius: 999px; padding: .2rem .7rem; color: var(--muted); font-size: .88rem; }
+.folders button:hover { background: var(--panel-2); }
+.folders button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+#c-list { list-style: none; margin: 0; padding: .3rem; overflow-y: auto; overflow-x: hidden; flex: 1; }
+#c-list li { display: flex; gap: .65rem; padding: .45rem .55rem; cursor: pointer; align-items: center; border-radius: 10px; user-select: none; }
+#c-list li:hover { background: var(--panel-2); }
+#c-list li.active { background: var(--accent); color: var(--accent-text); }
+#c-list li.active .muted { color: inherit; opacity: .85; }
+.c-body { flex: 1; min-width: 0; }
+.c-title { display: flex; gap: .35rem; align-items: center; font-weight: 600; }
+.c-title span.t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.c-sub { font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.avatar { position: relative; width: 2.6rem; height: 2.6rem; flex: none; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 1rem; background: var(--muted); }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg); overflow: hidden; }
+.chat-empty { margin: auto; padding: 2rem; text-align: center; max-width: 32rem; }
+.chat-empty .big-ico .ico { width: 3.2rem; height: 3.2rem; color: var(--accent); opacity: .5; }
+.chat-empty ul { text-align: left; color: var(--muted); line-height: 2; padding-left: 1.2rem; }
 /* ---- Narrow screens ---- */
 @media (max-width: 860px) {
+    .browse { grid-template-columns: 1fr; }
+    .browse.open .chats { display: none; }
+    .browse:not(.open) .chat { display: none; }
+    .back { display: inline-flex; }
     nav button { padding: .3rem .55rem; }
 }
 @media (max-width: 700px) {

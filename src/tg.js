@@ -1,7 +1,7 @@
-// Telegram connection, login
+// Telegram connection, login, chat list
 const fs = require('node:fs');
 const path = require('node:path');
-const { TelegramClient, Api } = require('telegram');
+const { TelegramClient, Api, utils } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { Logger } = require('telegram/extensions');
 const { DATA_DIR, getSetting } = require('./db');
@@ -13,8 +13,15 @@ let client = null;
 let connecting = null;
 let pendingLogin = null;
 let me = null;
+let dialogCache = { at: 0, list: [], entities: new Map() };
+// Chats seen before but not in the chat list (e.g. public channels)
+const extraEntities = new Map();
 
 const selfId = () => (me ? me.id.toString() : null);
+
+function rememberEntity(key, entity) {
+    if (!dialogCache.entities.has(key)) extraEntities.set(key, entity);
+}
 
 function credentials() {
     const apiId = parseInt(getSetting('api_id'), 10);
@@ -62,6 +69,7 @@ async function resetClient() {
     clearAuthCache();
     me = null;
     pendingLogin = null;
+    dialogCache = { at: 0, list: [], entities: new Map() };
     if (c) {
         try {
             await c.destroy();
@@ -160,7 +168,76 @@ async function logout() {
     log('已登出並刪除 session');
 }
 
+function dialogType(d) {
+    if (d.isUser) return 'user';
+    if (d.isChannel && !d.entity?.megagroup) return 'channel';
+    return 'group';
+}
+
+async function listDialogs(refresh = false) {
+    if (!refresh && dialogCache.list.length && Date.now() - dialogCache.at < 10 * 60 * 1000) return dialogCache.list;
+    const c = await getClient();
+    // The main list and the archive folder must be fetched separately; without a folder only the main list comes back
+    const [main, archived] = await Promise.all([c.getDialogs({ archived: false }), c.getDialogs({ archived: true })]);
+    const entities = new Map();
+    const list = [];
+    for (const d of [...main, ...archived]) {
+        const id = d.id.toString();
+        if (entities.has(id)) continue;
+        entities.set(id, d.entity);
+        const m = d.message;
+        const e = d.entity || {};
+        const photo = e.photo;
+        list.push({
+            id,
+            title: e.self ? '已儲存的訊息' : d.title || d.name || id,
+            type: dialogType(d),
+            username: e.username || null,
+            pinned: !!d.pinned,
+            archived: !!d.archived,
+            forum: !!e.forum,
+            creator: !!e.creator,
+            admin: !!e.adminRights,
+            self: !!e.self,
+            left: !!e.left,
+            bot: !!e.bot,
+            contact: !!e.contact,
+            noforwards: !!e.noforwards,
+            migrated: !!e.migratedTo,
+            folderId: d.folderId || 0,
+            muted: !!(d.dialog && d.dialog.notifySettings && d.dialog.notifySettings.muteUntil > Date.now() / 1000),
+            hasPhoto: !!photo && !(photo instanceof Api.ChatPhotoEmpty) && !(photo instanceof Api.UserProfilePhotoEmpty),
+            lastDate: m ? new Date(m.date * 1000).toISOString() : null,
+            lastId: m ? m.id : 0,
+        });
+    }
+    dialogCache = { at: Date.now(), list, entities };
+    return list;
+}
+
+// chatId can be a dialog's numeric id, an @username or a t.me link
+async function resolveChat(chatId) {
+    const id = String(chatId).trim();
+    const c = await getClient();
+    if (!/^-?\d+$/.test(id)) {
+        const name = id.replace(/^https?:\/\/t\.me\//, '').replace(/^@/, '');
+        const entity = await c.getEntity(name);
+        const key = utils.getPeerId(entity).toString();
+        rememberEntity(key, entity);
+        return { entity, key, title: entity.title || [entity.firstName, entity.lastName].filter(Boolean).join(' ') || entity.username || name };
+    }
+    if (extraEntities.has(id) && !dialogCache.entities.has(id)) {
+        const entity = extraEntities.get(id);
+        return { entity, key: id, title: entity.title || entity.firstName || id };
+    }
+    if (!dialogCache.entities.has(id)) await listDialogs(true);
+    const entity = dialogCache.entities.get(id);
+    if (!entity) throw new Error(`對話列表裡找不到 ${id}（帳號可能已退出這個頻道）`);
+    const d = dialogCache.list.find((x) => x.id === id);
+    return { entity, key: id, title: d ? d.title : id };
+}
+
 module.exports = {
     getClient, resetClient, authStatus, sendCode, signIn, signInPassword, logout,
-    selfId,
+    listDialogs, resolveChat, rememberEntity, selfId,
 };

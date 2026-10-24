@@ -1,4 +1,5 @@
 const $ = (s) => document.querySelector(s);
+const CHAT_TYPES = { channel: '頻道', group: '群組', user: '私訊' };
 
 let settings = { media_types: ['photo', 'video', 'gif', 'document', 'audio', 'voice', 'video_note'] };
 
@@ -118,6 +119,7 @@ function showTab(name) {
     currentTab = name;
     document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('hidden', s.id !== `tab-${name}`));
+    if (name === 'media' && typeof loadChats === 'function') guard(loadChats)();
     try { localStorage.setItem('tab', name); } catch { /* private mode */ }
 }
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -138,6 +140,7 @@ async function pollStatus() {
         $('#login-done').classList.toggle('hidden', !s.auth.authorized);
         $('#login-form').classList.toggle('hidden', s.auth.authorized);
         if (s.auth.authorized) $('#login-user').textContent = s.auth.user.name + (s.auth.user.username ? ` (@${s.auth.user.username})` : '');
+        if (lastAuth === false && s.auth.authorized && typeof loadChats === 'function') guard(loadChats)(true);
         lastAuth = s.auth.authorized;
     } catch {
         $('#auth-badge').textContent = '伺服器離線';
@@ -199,9 +202,9 @@ window.addEventListener('DOMContentLoaded', () => {
     applyIcons();
     applyPrefs();
     guard(loadSettings)();
-    let startTab = 'settings';
-    try { startTab = localStorage.getItem('tab') || 'settings'; } catch { /* private mode */ }
-    if (!document.querySelector(`nav button[data-tab="${startTab}"]`)) startTab = 'settings';
+    let startTab = 'media';
+    try { startTab = localStorage.getItem('tab') || 'media'; } catch { /* private mode */ }
+    if (!document.querySelector(`nav button[data-tab="${startTab}"]`)) startTab = 'media';
     showTab(startTab);
     pollStatus();
     // Refresh every 5 seconds

@@ -1,9 +1,11 @@
 require('./logfile'); // load first: log rotation, filters connection-timeout noise
+const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const { getSetting, setSetting } = require('./db');
 const tg = require('./tg');
 const { log } = require('./log');
+const browse = require('./browse');
 
 const PORT = Number(process.env.PORT) || 8787;
 const app = express();
@@ -43,6 +45,41 @@ app.post('/api/auth/send-code', wrap((req) => tg.sendCode(String(req.body.phone 
 app.post('/api/auth/sign-in', wrap((req) => tg.signIn(req.body.code)));
 app.post('/api/auth/password', wrap((req) => tg.signInPassword(String(req.body.password || ''))));
 app.post('/api/auth/logout', wrap(() => tg.logout()));
+
+// ---- Chat list ----
+app.get('/api/dialogs', wrap(async (req) => {
+    const list = await tg.listDialogs(req.query.refresh === '1');
+    return list.filter((d) => !d.migrated);
+}));
+app.get('/api/folders', wrap(() => browse.folders()));
+app.post('/api/resolve', wrap(async (req) => {
+    const { key, title } = await tg.resolveChat(req.body.chat);
+    return { id: key, title };
+}));
+
+// ---- Media wall ----
+function sniffImage(file) {
+    const fd = fs.openSync(file, 'r');
+    const b = Buffer.alloc(12);
+    fs.readSync(fd, b, 0, 12, 0);
+    fs.closeSync(fd);
+    if (b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+    if (b[0] === 0x89 && b[1] === 0x50) return 'image/png';
+    return 'image/jpeg';
+}
+
+// Image responses: cached in the browser for a week; 404 when there is no image
+const sendImage = (getFile) => (req, res) => {
+    getFile(req)
+        .then((file) => {
+            if (!file) return res.status(404).end();
+            res.set('Cache-Control', 'private, max-age=604800');
+            res.type(sniffImage(file)).sendFile(file);
+        })
+        .catch((e) => res.status(400).json({ error: e.errorMessage || e.message }));
+};
+
+app.get('/api/chat/:chat/avatar', sendImage((req) => browse.avatar(req.params.chat)));
 
 /**
  * Starts the web server, and only connects to Telegram once that succeeds. Returns { url }.
