@@ -148,6 +148,19 @@ async function fingerprint(msg, chatKey = require('./tg').peerKey(msg.peerId)) {
     return fp;
 }
 
+const cached = (key) => (key ? memo.get(key) || null : null);
+
+// Already computed fingerprints (only returned if in memory or the database; never fetches thumbnails)
+function cachedFp(key) {
+    if (!key) return null;
+    if (memo.has(key)) return memo.get(key);
+    const s = store.get(key);
+    if (!s) return null;
+    const fp = { key, kind: s.kind, phash: s.phash, aspect: s.aspect, w: s.w, h: s.h, duration: s.duration, size: s.size };
+    memo.set(key, fp);
+    return fp;
+}
+
 // Precompute fingerprints for a batch of messages (thumbnail downloads are limited to 4 at a time)
 async function ensure(msgs) {
     await Promise.all(msgs.filter((m) => kindOf(m) && fileKeyOf(m) && !memo.has(fileKeyOf(m))).map((m) => fingerprint(m).catch(() => null)));
@@ -200,4 +213,4 @@ function findDownloaded(fp, level) {
     return best;
 }
 
-module.exports = { fingerprint, ensure, compare, findDownloaded, addDownloaded, kindOf, fileKeyOf, LEVELS };
+module.exports = { fingerprint, ensure, cached, cachedFp, compare, findDownloaded, addDownloaded, kindOf, fileKeyOf, LEVELS };

@@ -6,6 +6,7 @@ const TYPE_LABELS = {
 const CHAT_TYPES = { channel: '頻道', group: '群組', user: '私訊' };
 
 let settings = { media_types: ['photo', 'video', 'gif', 'document', 'audio', 'voice', 'video_note'] };
+let taskList = [];
 
 async function api(method, url, body) {
     const res = await fetch(url, {
@@ -44,6 +45,8 @@ function shortStamp(iso) {
     const md = `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
     return d.getFullYear() === new Date().getFullYear() ? md : `${d.getFullYear()}/${md}`;
 }
+// Small icon buttons in tables (with a tooltip on hover)
+const iconBtn = (icon, title, attrs, cls = '') => `<button class="ibtn ${cls}" title="${esc(title)}" ${attrs}>${ico(icon)}</button>`;
 
 const guard = (fn) => async (...args) => {
     try {
@@ -97,6 +100,11 @@ async function confirmBox(message, { ok = '確定', danger = false, title = '請
         [{ label: '取消', value: false }, { label: ok, value: true, cls: danger ? 'danger' : 'primary' }]);
     return r === true;
 }
+async function promptBox(message, value = '', title = '請輸入') {
+    const r = await ask(title, `<p style="white-space:pre-wrap">${esc(message)}</p><input id="ask-input" value="${esc(value)}">`,
+        [{ label: '取消', value: null }, { label: '確定', value: 'ok', cls: 'primary' }]);
+    return r === 'ok' ? $('#ask-input').value : null;
+}
 
 // ---- UI preferences (stored only in this window) ----
 const prefs = (() => {
@@ -140,6 +148,7 @@ function showTab(name) {
     document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('hidden', s.id !== `tab-${name}`));
     if (name === 'media' && typeof loadChats === 'function') guard(loadChats)();
+    if (name === 'tasks') guard(loadTasks)();
     if (name === 'log') pollStatus();
     if (name === 'settings') {
         guard(loadCacheSize)();
@@ -183,8 +192,9 @@ async function pollStatus() {
         } else {
             now.classList.add('hidden');
         }
-        // Downloads finished: refresh the media wall's downloaded marks
+        // Downloads finished: refresh the task list and the media wall's downloaded marks
         if (wasRunning && !s.running) {
+            if (currentTab === 'tasks') guard(loadTasks)();
             if (typeof refreshStatuses === 'function') refreshStatuses();
         }
         wasRunning = !!s.running;
@@ -314,6 +324,203 @@ $('#hidden-grid').addEventListener('click', guard(async (e) => {
     await renderHidden();
     if (typeof reloadWall === 'function') reloadWall();
 }));
+
+// ---- Tasks ----
+const RUN_STATUS = { ok: '完成', partial: '部分失敗', error: '錯誤', cancelled: '已停止', interrupted: '中斷', running: '執行中' };
+const CRON_NAMES = {
+    '*/15 * * * *': '每 15 分鐘', '*/30 * * * *': '每 30 分鐘', '0 * * * *': '每小時', '0 */6 * * *': '每 6 小時', '0 3 * * *': '每天 03:00',
+};
+
+async function loadTasks() {
+    taskList = await api('GET', '/api/tasks');
+    $('#task-rows').innerHTML = taskList.map((t) => {
+        const [status, ...rest] = (t.last_result || '').split('｜');
+        const result = rest.join('｜');
+        const sched = t.auto ? '有新媒體就下載' : t.cron ? CRON_NAMES[t.cron] || t.cron : '';
+        return `<tr>
+            <td><input type="checkbox" data-toggle="${t.id}" ${t.enabled ? 'checked' : ''} title="啟用"></td>
+            <td title="${esc(t.name)}"><b>${esc(t.name)}</b>${t.auto ? ' <span class="c-tag">自動</span>' : ''}</td>
+            <td title="${esc(t.chat_title || t.chat_id)}" class="muted">${esc(t.chat_title || t.chat_id)}${t.filters.thread ? '（話題）' : ''}</td>
+            <td title="${esc(t.cron || '')}">${sched ? esc(sched) : '<span class="muted">手動</span>'}</td>
+            <td>${t.filters.incremental === false ? '<span class="muted">每次全掃</span>' : `#${t.last_msg_id}`}</td>
+            <td title="${esc(t.last_run_at ? fmtTime(t.last_run_at) : '')}">${t.last_run_at ? shortStamp(t.last_run_at) : '<span class="muted">尚未執行</span>'}</td>
+            <td title="${esc(result)}">${status ? `<span class="s-${esc(status)}">${RUN_STATUS[status] || esc(status)}</span> ${esc(result)}` : ''}</td>
+            <td class="actions">${iconBtn('play', '立即執行', `data-run="${t.id}"`, 'primary')}${t.auto ? '' : iconBtn('edit', '編輯', `data-edit="${t.id}"`)}${iconBtn('refresh', '重設進度', `data-reset="${t.id}"`)}${iconBtn('trash', t.auto ? '關閉自動下載（刪除這個任務）' : '刪除任務', `data-del="${t.id}"`, 'danger')}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="8" class="muted" style="text-align:center">還沒有任務。到媒體牆按「建立排程任務」，或按上面的「新增排程任務」。</td></tr>';
+}
+
+$('#task-rows').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('button, input');
+    if (!b) return;
+    const id = Number(b.dataset.run || b.dataset.edit || b.dataset.reset || b.dataset.del || b.dataset.toggle);
+    if (!id) return;
+    const t = taskList.find((x) => x.id === id);
+    if (b.dataset.run) {
+        const r = await api('POST', `/api/tasks/${id}/run`);
+        toast(r.queued ? `「${t.name}」已加入佇列` : `「${t.name}」已經在排隊了`);
+        pollStatus();
+    } else if (b.dataset.edit) {
+        openTask(t);
+    } else if (b.dataset.reset) {
+        const v = await promptBox(`把「${t.name}」的進度設回第幾則訊息？\n0 = 從第一則重新掃（已下載的照樣會略過）`, '0', '重設進度');
+        if (v === null) return;
+        await api('POST', `/api/tasks/${id}/reset`, { lastMsgId: Number(v) || 0 });
+        loadTasks();
+    } else if (b.dataset.del) {
+        if (!(await confirmBox(t.auto ? `關閉「${t.chat_title || t.name}」的自動下載新媒體？` : `刪除任務「${t.name}」？已下載的檔案和紀錄不會被刪。`, { ok: t.auto ? '關閉' : '刪除', danger: true }))) return;
+        await api('DELETE', `/api/tasks/${id}`);
+        loadTasks();
+        if (typeof loadChats === 'function') guard(loadChats)();
+    } else if (b.dataset.toggle) {
+        await api('PUT', `/api/tasks/${id}`, { ...t, enabled: b.checked });
+        toast(b.checked ? '已啟用' : '已停用');
+        loadTasks();
+    }
+}));
+
+// ---- Task editor ----
+let editing = null;
+let pickedChat = null; // { id, title, forum }
+$('#f-types').innerHTML = Object.entries(TYPE_LABELS).filter(([k]) => k !== 'image')
+    .map(([k, v]) => `<label class="check"><input type="checkbox" value="${k}"> ${v}</label>`).join('');
+$('#task-form').addEventListener('submit', (e) => e.preventDefault());
+
+async function setChat(chat, topic = '') {
+    pickedChat = chat;
+    $('#f-chat-title').value = chat ? chat.title : '';
+    if (chat && !$('#f-name').value) $('#f-name').placeholder = chat.title;
+    // Forum groups can fetch just one topic
+    const wrap = $('#f-topic-wrap');
+    wrap.classList.add('hidden');
+    $('#f-topic').innerHTML = '<option value="">全部話題</option>';
+    if (!chat) return;
+    try {
+        const topics = await api('GET', `/api/chat/${enc(chat.id)}/topics`);
+        if (topics.length) {
+            $('#f-topic').innerHTML += topics.map((t) => `<option value="${t.id}">${esc(t.title)}</option>`).join('');
+            wrap.classList.remove('hidden');
+        }
+    } catch {
+        // If topics can't be read, only the whole group can be picked
+    }
+    $('#f-topic').value = topic ? String(topic) : '';
+}
+
+/** Open the task editor. t = existing task; preset = conditions carried over from the media wall (new task) */
+function openTask(t, preset = null) {
+    editing = t ? t.id : null;
+    $('#task-dialog-title').textContent = t ? `編輯任務：${t.name}` : '新增排程任務';
+    const f = (t && t.filters) || (preset && preset.filters) || {};
+    const chat = t ? { id: t.chat_id, title: t.chat_title || t.chat_id } : preset ? preset.chat : null;
+    $('#f-name').value = t ? t.name : '';
+    $('#f-name').placeholder = '預設用群組名稱';
+    setChat(chat, f.thread);
+    const cron = (t && t.cron) || (preset ? '0 * * * *' : '');
+    const presetCron = [...$('#f-cron-preset').options].some((o) => o.value === cron) ? cron : 'custom';
+    $('#f-cron-preset').value = presetCron;
+    $('#f-cron').value = cron;
+    $('#f-cron').classList.toggle('hidden', presetCron !== 'custom');
+    $('#f-enabled').checked = t ? t.enabled : true;
+    const types = f.types && f.types.length ? f.types : ['photo', 'video', 'gif', 'document', 'audio'];
+    document.querySelectorAll('#f-types input').forEach((i) => { i.checked = types.includes(i.value); });
+    $('#f-min').value = f.minSizeMB || '';
+    $('#f-max').value = f.maxSizeMB || '';
+    $('#f-from').value = f.dateFrom || '';
+    $('#f-to').value = f.dateTo || '';
+    $('#f-include').value = f.include || '';
+    $('#f-exclude').value = f.exclude || '';
+    $('#f-ext').value = f.extensions || '';
+    $('#f-max-per-run').value = f.maxPerRun || '';
+    $('#f-incremental').checked = f.incremental !== false;
+    $('#f-dest').value = (t && t.dest_dir) || '';
+    $('#f-template').value = (t && t.name_template) || '';
+    $('#preview').classList.add('hidden');
+    $('#task-dialog').showModal();
+}
+
+function readForm() {
+    const preset = $('#f-cron-preset').value;
+    return {
+        name: $('#f-name').value.trim() || (pickedChat && pickedChat.title) || '',
+        chat_id: pickedChat && pickedChat.id,
+        chat_title: pickedChat && pickedChat.title,
+        enabled: $('#f-enabled').checked,
+        cron: preset === 'custom' ? $('#f-cron').value.trim() : preset,
+        filters: {
+            types: [...document.querySelectorAll('#f-types input:checked')].map((i) => i.value),
+            minSizeMB: $('#f-min').value,
+            maxSizeMB: $('#f-max').value,
+            dateFrom: $('#f-from').value,
+            dateTo: $('#f-to').value,
+            include: $('#f-include').value,
+            exclude: $('#f-exclude').value,
+            extensions: $('#f-ext').value,
+            thread: $('#f-topic').value,
+            maxPerRun: $('#f-max-per-run').value,
+            incremental: $('#f-incremental').checked,
+        },
+        dest_dir: $('#f-dest').value.trim(),
+        name_template: $('#f-template').value.trim(),
+    };
+}
+
+$('#f-cron-preset').addEventListener('change', () => {
+    const custom = $('#f-cron-preset').value === 'custom';
+    $('#f-cron').classList.toggle('hidden', !custom);
+    if (custom) $('#f-cron').focus();
+});
+$('#btn-new-task').addEventListener('click', () => openTask(null));
+$('#btn-cancel-task').addEventListener('click', () => $('#task-dialog').close());
+$('#btn-save-task').addEventListener('click', guard(async () => {
+    const body = readForm();
+    if (editing) await api('PUT', `/api/tasks/${editing}`, body);
+    else await api('POST', '/api/tasks', body);
+    $('#task-dialog').close();
+    toast('任務已儲存');
+    if (currentTab === 'tasks') loadTasks();
+}));
+$('#btn-preview').addEventListener('click', guard(async () => {
+    const box = $('#preview');
+    box.classList.remove('hidden');
+    box.innerHTML = '<p class="muted">讀取中…（從最新往回看，最多 3000 則）</p>';
+    const r = await api('POST', '/api/preview', readForm());
+    const fresh = r.items.filter((i) => !i.duplicate).length;
+    box.innerHTML = `<p>在「${esc(r.chatTitle)}」最近 ${r.scanned} 則訊息中，符合 ${r.items.length} 個，其中 <b>${fresh}</b> 個會下載，${r.items.length - fresh} 個重複或已隱藏（劃線）。</p>
+        <table class="list"><colgroup><col style="width:5rem"><col style="width:7.5rem"><col style="width:4.5rem"><col style="width:5.5rem"><col><col></colgroup>
+        <thead><tr><th class="r">#</th><th>日期</th><th>類型</th><th class="r">大小</th><th>存成</th><th>略過原因</th></tr></thead><tbody>
+        ${r.items.map((i) => `<tr class="${i.duplicate ? 'dup' : ''}">
+            <td class="r">${i.msgId}</td><td>${shortStamp(i.date)}</td><td>${TYPE_LABELS[i.type] || i.type}</td><td class="r">${fmtSize(i.size)}</td>
+            <td title="${esc(i.fileName)}">${esc(i.fileName)}</td><td title="${esc(i.duplicate || '')}">${esc(i.duplicate || '')}</td></tr>`).join('')}
+        </tbody></table>`;
+}));
+
+// ---- Pick a group (for tasks) ----
+let pickDialogs = [];
+function renderPick() {
+    const q = $('#chat-q').value.trim().toLowerCase();
+    const list = pickDialogs.filter((d) => !q || d.title.toLowerCase().includes(q) || (d.username || '').toLowerCase().includes(q));
+    $('#chat-list').innerHTML = list.slice(0, 300).map((d) => `<li data-id="${esc(d.id)}">
+        <span>${esc(d.title)} ${d.username ? `<span class="muted">@${esc(d.username)}</span>` : ''}</span>
+        <span class="muted">${CHAT_TYPES[d.type] || ''}</span></li>`).join('') || '<li class="muted">沒有符合的對話</li>';
+}
+$('#btn-pick-chat').addEventListener('click', guard(async () => {
+    $('#chat-dialog').showModal();
+    $('#chat-q').value = '';
+    $('#chat-list').innerHTML = '<li class="muted">讀取中…</li>';
+    pickDialogs = await api('GET', '/api/dialogs');
+    renderPick();
+    $('#chat-q').focus();
+}));
+$('#btn-chat-close').addEventListener('click', () => $('#chat-dialog').close());
+$('#chat-q').addEventListener('input', renderPick);
+$('#chat-list').addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-id]');
+    if (!li) return;
+    const d = pickDialogs.find((x) => x.id === li.dataset.id);
+    setChat({ id: d.id, title: d.title });
+    $('#chat-dialog').close();
+});
 
 // ---- Startup ----
 window.addEventListener('DOMContentLoaded', () => {

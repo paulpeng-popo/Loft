@@ -329,6 +329,43 @@ $('#m-sel-dl').addEventListener('click', guard(async () => {
     updateSelection();
 }));
 
+// Current wall filters -> task filters
+const TYPE_TO_TASK = {
+    visual: ['photo', 'video', 'gif'], photo: ['photo'], video: ['video'], gif: ['gif'], document: ['document'], music: ['audio'],
+    voice: ['voice', 'video_note'], all: ['photo', 'video', 'gif', 'document', 'audio', 'voice', 'video_note'],
+};
+function filtersFromWall() {
+    const p = wallParams();
+    return {
+        types: TYPE_TO_TASK[p.type] || TYPE_TO_TASK.visual,
+        dateFrom: p.from,
+        dateTo: p.to,
+        minSizeMB: p.minMB,
+        include: p.q,
+        thread: p.topic,
+        incremental: true,
+    };
+}
+$('#m-dl-all').addEventListener('click', guard(async () => {
+    if (!cur) return;
+    const f = filtersFromWall();
+    const desc = [
+        $('#m-type').selectedOptions[0].textContent,
+        $('#m-topic').value ? `話題「${$('#m-topic').selectedOptions[0].textContent}」` : '',
+        f.dateFrom || f.dateTo ? `${f.dateFrom || '最早'}～${f.dateTo || '現在'}` : '',
+        f.minSizeMB ? `至少 ${f.minSizeMB} MB` : '',
+        f.include ? `包含「${f.include}」` : '',
+    ].filter(Boolean).join('、');
+    if (!(await confirmBox(`把「${cur.title}」裡所有符合條件的媒體都下載下來？\n條件：${desc}\n\n會從第一則開始掃，已下載過、重複、已隱藏的會自動略過。媒體很多時要跑一段時間，進度看上方。`, { ok: '開始下載' }))) return;
+    await api('POST', '/api/download-all', { chat_id: cur.id, chat_title: cur.title, name: cur.title, filters: { ...f, incremental: false } });
+    toast('已加入下載佇列，進度看上方');
+    pollStatus();
+}));
+$('#m-make-task').addEventListener('click', () => {
+    if (!cur) return;
+    openTask(null, { chat: { id: cur.id, title: cur.title }, filters: filtersFromWall() });
+});
+
 // ---- Context menu ----
 let ctxMenu = null;
 function closeCtx() {

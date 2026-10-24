@@ -201,6 +201,8 @@ app.post('/api/download', wrap((req) => ({
     queued: downloader.enqueueBatch((req.body.items || []).map((x) => ({ chat: String(x.chat), id: Number(x.id) })),
         req.body.label || '下載選取的媒體', { force: !!req.body.force }),
 })));
+// The media wall's download-all-matches button: one run with the current filters (not saved as a task)
+app.post('/api/download-all', wrap((req) => ({ queued: downloader.enqueueAdhoc(validateTask(req.body)) })));
 
 app.get('/api/cache', wrap(() => browse.cacheSize()));
 app.delete('/api/cache', wrap(() => {
@@ -228,6 +230,7 @@ app.post('/api/tasks/:id/run', wrap((req) => ({ queued: downloader.enqueue(req.p
 app.post('/api/tasks/:id/reset', wrap((req) => {
     tasks.setProgress(Number(req.params.id), Number(req.body.lastMsgId) || 0);
 }));
+app.post('/api/preview', wrap((req) => downloader.preview(validateTask(req.body), Number(req.body.limit) || 200)));
 app.post('/api/stop', wrap(() => downloader.stop(true)));
 
 /**

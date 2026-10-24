@@ -11,6 +11,7 @@
     <h1><span class="logo" data-icon="download"></span> Loft</h1>
     <nav>
         <button data-tab="media" data-icon="image">媒體</button>
+        <button data-tab="tasks" data-icon="clock">任務</button>
         <button data-tab="log" data-icon="log">日誌</button>
         <button data-tab="settings" data-icon="settings">設定</button>
     </nav>
@@ -96,6 +97,8 @@
                         <button id="m-sel-none" class="small hidden">取消選取</button>
                         <button id="m-sel-dl" class="small primary" disabled>下載選取</button>
                         <span class="spacer"></span>
+                        <button id="m-dl-all" class="small" title="照上面的篩選條件，把整個群組符合的媒體都下載（重複的會略過）">下載全部符合條件的</button>
+                        <button id="m-make-task" class="small" title="用上面的篩選條件建立排程任務">建立排程任務</button>
                     </div>
                     <div id="m-wall">
                         <div id="m-grid" class="wall"></div>
@@ -104,6 +107,19 @@
                 </div>
             </section>
         </div>
+    </section>
+
+    <!-- Tasks -->
+    <section id="tab-tasks" class="tab hidden">
+        <div class="toolbar">
+            <button id="btn-new-task" class="primary">＋ 新增排程任務</button>
+            <span class="muted">定時把某個群組的新媒體下載下來。媒體牆上的「建立排程任務」會直接帶入篩選條件。</span>
+        </div>
+        <div class="scroll-area"><table class="list">
+            <colgroup><col style="width:3.5rem"><col style="width:20%"><col style="width:18%"><col style="width:7rem"><col style="width:6rem"><col style="width:7.5rem"><col><col style="width:10.5rem"></colgroup>
+            <thead><tr><th>啟用</th><th>名稱</th><th>群組</th><th>排程</th><th>進度</th><th>上次執行</th><th>上次結果</th><th></th></tr></thead>
+            <tbody id="task-rows"></tbody>
+        </table></div>
     </section>
 
     <!-- Log -->
@@ -181,6 +197,79 @@
         </div>
     </section>
 </main>
+
+<!-- Task editor -->
+<dialog id="task-dialog">
+    <form method="dialog" id="task-form">
+        <h2 id="task-dialog-title">新增排程任務</h2>
+        <div class="grid">
+            <label class="wide">群組或頻道
+                <div class="row">
+                    <input id="f-chat-title" readonly placeholder="尚未選擇">
+                    <button type="button" id="btn-pick-chat">從列表選</button>
+                </div>
+            </label>
+            <label id="f-topic-wrap" class="hidden">話題
+                <select id="f-topic"><option value="">全部話題</option></select>
+            </label>
+            <label>任務名稱 <input id="f-name" placeholder="預設用群組名稱"></label>
+            <label>排程
+                <select id="f-cron-preset">
+                    <option value="">不排程（只手動執行）</option>
+                    <option value="*/15 * * * *">每 15 分鐘</option>
+                    <option value="*/30 * * * *">每 30 分鐘</option>
+                    <option value="0 * * * *">每小時</option>
+                    <option value="0 */6 * * *">每 6 小時</option>
+                    <option value="0 3 * * *">每天 03:00</option>
+                    <option value="custom">自訂 cron…</option>
+                </select>
+                <input id="f-cron" class="hidden" placeholder="分 時 日 月 週，例如 0 */2 * * *">
+            </label>
+            <label class="check"><input type="checkbox" id="f-enabled" checked> 啟用</label>
+        </div>
+
+        <fieldset>
+            <legend>篩選</legend>
+            <div id="f-types" class="checks"></div>
+            <div class="grid">
+                <label>最小（MB） <input id="f-min" type="number" min="0" step="any"></label>
+                <label>最大（MB） <input id="f-max" type="number" min="0" step="any"></label>
+                <label>起始日期 <input id="f-from" type="date"></label>
+                <label>結束日期 <input id="f-to" type="date"></label>
+                <label>包含關鍵字（說明文字或檔名，逗號分隔） <input id="f-include"></label>
+                <label>排除關鍵字 <input id="f-exclude"></label>
+                <label>副檔名（例 mp4, zip） <input id="f-ext"></label>
+                <label>單次最多下載幾個 <input id="f-max-per-run" type="number" min="0" placeholder="0 = 不限"></label>
+                <label class="check wide"><input type="checkbox" id="f-incremental" checked> 只抓上次進度之後的新媒體（取消勾選 = 每次從第一則全部掃一遍）</label>
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>存放（留空 = 用設定裡的預設）</legend>
+            <div class="grid">
+                <label class="wide">資料夾 <input id="f-dest" placeholder="留空 = 下載資料夾\群組名稱"></label>
+                <label class="wide">檔名範本 <input id="f-template" placeholder="留空 = 設定裡的檔名範本"></label>
+            </div>
+        </fieldset>
+
+        <div class="actions">
+            <button type="button" id="btn-preview">預覽會下載哪些</button>
+            <span class="spacer"></span>
+            <button type="button" id="btn-cancel-task">取消</button>
+            <button type="button" id="btn-save-task" class="primary">儲存</button>
+        </div>
+        <div id="preview" class="hidden"></div>
+    </form>
+</dialog>
+
+<!-- Pick a group -->
+<dialog id="chat-dialog">
+    <div class="toolbar">
+        <input id="chat-q" placeholder="搜尋">
+        <button id="btn-chat-close">關閉</button>
+    </div>
+    <ul id="chat-list" class="pick-list"></ul>
+</dialog>
 
 <!-- Hidden media -->
 <dialog id="hidden-dialog">

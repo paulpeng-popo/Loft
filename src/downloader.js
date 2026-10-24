@@ -87,18 +87,20 @@ const inflightKeys = new Set(); // Telegram files being downloaded right now (du
  * Duplicate check before download. Returns { skip: reason } or { fp } (fp = similarity fingerprint, saved after download for later checks)
  * runFps: fingerprints already queued in this run, so only the first of several look-alikes in one batch is fetched
  */
-async function precheck(chatKey, msg, info, runFps, force) {
+// quick: for previews, don't fetch thumbnails to compute fingerprints (ones already computed are still compared); much faster
+async function precheck(chatKey, msg, info, runFps, force, quick = false) {
     if (downloads.byMessage(chatKey, msg.id)) return { skip: '這則已下載過' };
     if (force) return {};
-    if (await hidden.check(msg)) return { skip: '已隱藏' };
+    if (quick ? hidden.isKeyHidden(info.key) : await hidden.check(msg)) return { skip: '已隱藏' };
     if (info.key) {
         const hit = downloads.byKey(info.key);
         if (hit) return { skip: `同一個檔案已下載（${hit.chat_title || hit.chat_id} #${hit.msg_id}）` };
         if (inflightKeys.has(info.key)) return { skip: '同一個檔案正在下載' };
     }
     if (!similar.kindOf(msg)) return {};
-    const fp = await similar.fingerprint(msg, chatKey).catch(() => null);
+    const fp = quick ? similar.cachedFp(info.key) : await similar.fingerprint(msg, chatKey).catch(() => null);
     if (!fp) return {};
+    if (quick && hidden.matchFp(fp)) return { skip: '已隱藏（看起來一樣）' };
     for (const other of runFps) {
         if (similar.compare(fp, other.fp, 'normal').similar) return { skip: `和這次的 #${other.msgId} 看起來一樣` };
     }
@@ -256,7 +258,7 @@ async function downloadOne({ task, msg, info, key, chatTitle, dir, stats, fp = n
 
 /**
  * Messages a task looks at: Telegram's media search, each type queried separately and merged by id (text messages are never scanned).
- * oldest: true = oldest first (downloads), false = newest first
+ * oldest: true = oldest first (downloads), false = newest first (preview)
  */
 async function taskMessages(c, entity, f, { after = 0, oldest = true } = {}) {
     const browse = require('./browse');
@@ -270,17 +272,51 @@ async function taskMessages(c, entity, f, { after = 0, oldest = true } = {}) {
     });
 }
 
-async function runTask(taskId, trigger) {
-    const task = tasks.get(taskId);
-    if (!task) return;
+/** Preview what the filters match (no download). task can be unsaved form contents. */
+async function preview(task, limit = 200) {
+    const { entity, key, title } = await tg.resolveChat(task.chat_id);
+    const c = await tg.getClient();
     const f = task.filters || {};
-    const incremental = f.incremental !== false;
+    const items = [];
+    const fps = [];
+    let scanned = 0;
+    for await (const msg of await taskMessages(c, entity, f, { oldest: false })) {
+        scanned++;
+        if (scanned > 3000) break;
+        const info = mediaInfo(msg);
+        if (!info) continue;
+        if (rejectReason(msg, info, f)) continue;
+        const pre = await precheck(key, msg, info, fps, false, true);
+        if (pre.fp) fps.push({ fp: pre.fp, msgId: msg.id });
+        items.push({
+            msgId: msg.id,
+            date: new Date(msg.date * 1000).toISOString(),
+            type: info.type,
+            name: info.name,
+            size: info.size,
+            caption: (msg.message || '').slice(0, 120),
+            fileName: await nameFor(task.name_template, msg, info, key, title),
+            duplicate: pre.skip || null,
+        });
+        if (items.length >= limit) break;
+    }
+    return { chatTitle: title, scanned, items };
+}
+
+// taskId can be a task object directly (the media wall's download-all-matches button, not saved to the tasks table)
+async function runTask(taskId, trigger) {
+    const adhoc = typeof taskId === 'object';
+    const task = adhoc ? { ...taskId, id: null, last_msg_id: 0 } : tasks.get(taskId);
+    if (!task) return;
+    taskId = task.id;
+    const f = task.filters || {};
+    const incremental = !adhoc && f.incremental !== false;
     const maxPerRun = Number(f.maxPerRun) || 0;
     const stats = { scanned: 0, downloaded: 0, skipped: 0, failed: 0 };
     const runId = runs.start(taskId, trigger);
     state.cancel = false;
     state.running = { taskId, taskName: task.name, runId, ...stats, active: new Map() };
-    log(`開始任務「${task.name}」（${trigger}）`);
+    log(`開始${adhoc ? '' : '任務'}「${task.name}」（${trigger}）`);
 
     let status = 'ok';
     let message = '';
@@ -357,8 +393,8 @@ async function runTask(taskId, trigger) {
     }
 
     const summary = `掃描 ${stats.scanned}、下載 ${stats.downloaded}、略過重複 ${stats.skipped}、失敗 ${stats.failed}`;
-    runs.finish(runId, { status, ...stats, message });
-    tasks.setResult(taskId, `${status}｜${summary}${message ? `｜${message}` : ''}`);
+    runs.finish(runId, { status, ...stats, message: message || (adhoc ? `一次性：${task.name}` : '') });
+    if (!adhoc) tasks.setResult(taskId, `${status}｜${summary}${message ? `｜${message}` : ''}`);
     log(`結束「${task.name}」：${status}，${summary}`);
 }
 
@@ -437,11 +473,18 @@ function enqueueBatch(items, label = '下載選取的媒體', { force = false, f
     return true;
 }
 
+function enqueueAdhoc(task) {
+    state.queue.push({ taskId: null, adhoc: task, label: `下載全部符合條件的：${task.name || task.chat_title || task.chat_id}` });
+    pump();
+    return true;
+}
+
 async function pump() {
     if (state.running || !state.queue.length) return;
     const job = state.queue.shift();
     try {
         if (job.batch) await runBatch(job.batch);
+        else if (job.adhoc) await runTask(job.adhoc, 'adhoc');
         else await runTask(job.taskId, job.trigger);
     } catch (e) {
         log(`工作異常：${e.message}`);
@@ -479,5 +522,5 @@ function snapshot() {
 }
 
 module.exports = {
-    MEDIA_TYPES, mediaInfo, enqueue, enqueueBatch, stop, snapshot, log, rejectReason, fileNameFor,
+    MEDIA_TYPES, mediaInfo, enqueue, enqueueBatch, enqueueAdhoc, stop, snapshot, preview, log, rejectReason, fileNameFor,
 };
