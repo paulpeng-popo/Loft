@@ -79,7 +79,13 @@ const sendImage = (getFile) => (req, res) => {
         .catch((e) => res.status(400).json({ error: e.errorMessage || e.message }));
 };
 
+const bool = (v) => v === '1' || v === 'true' || v === true;
 app.get('/api/chat/:chat/avatar', sendImage((req) => browse.avatar(req.params.chat)));
+app.get('/api/chat/:chat/media', wrap((req) => browse.media(req.params.chat, {
+    ...req.query, notDownloaded: bool(req.query.notDownloaded),
+})));
+app.get('/api/chat/:chat/topics', wrap((req) => browse.topics(req.params.chat)));
+app.get('/api/chat/:chat/thumb/:msg', sendImage((req) => browse.thumb(req.params.chat, req.params.msg, req.query.s === 'small' ? 'small' : 'large')));
 
 /**
  * Starts the web server, and only connects to Telegram once that succeeds. Returns { url }.

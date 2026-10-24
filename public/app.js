@@ -1,4 +1,8 @@
 const $ = (s) => document.querySelector(s);
+const TYPE_LABELS = {
+    photo: '圖片', video: '影片', gif: 'GIF', document: '檔案', image: '圖檔',
+    audio: '音樂', voice: '語音', video_note: '圓形影片',
+};
 const CHAT_TYPES = { channel: '頻道', group: '群組', user: '私訊' };
 
 let settings = { media_types: ['photo', 'video', 'gif', 'document', 'audio', 'voice', 'video_note'] };
@@ -24,6 +28,21 @@ function toast(msg) {
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const enc = encodeURIComponent;
+const fmtSize = (n) => {
+    if (!n) return '-';
+    const u = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
+};
+// A time that fits on one line: within the same year show only month/day hour:minute
+function shortStamp(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, '0');
+    const md = `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return d.getFullYear() === new Date().getFullYear() ? md : `${d.getFullYear()}/${md}`;
+}
 
 const guard = (fn) => async (...args) => {
     try {

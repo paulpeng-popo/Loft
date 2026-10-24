@@ -46,6 +46,45 @@
                 <div id="m-empty" class="chat-empty">
                     <div class="big-ico" data-icon="image"></div>
                     <h2>選一個群組或頻道</h2>
+                    <ul>
+                        <li>點開就是媒體牆，論壇群組會把所有話題合在一起</li>
+                    </ul>
+                </div>
+                <div id="m-chat" class="hidden">
+                    <div class="chat-head">
+                        <button id="m-back" class="icon back" data-icon="back" title="返回列表"></button>
+                        <span id="m-avatar" class="avatar"></span>
+                        <div class="chat-meta">
+                            <b id="m-title"></b>
+                            <div id="m-sub" class="muted"></div>
+                        </div>
+                        <button id="m-reload" class="icon" data-icon="refresh" title="重新整理媒體牆"></button>
+                    </div>
+                    <div class="filterbar">
+                        <select id="m-topic" class="hidden" title="話題"></select>
+                        <select id="m-type" title="類型">
+                            <option value="visual">圖片、影片、GIF</option>
+                            <option value="photo">只有圖片</option>
+                            <option value="video">只有影片</option>
+                            <option value="gif">GIF</option>
+                            <option value="document">檔案</option>
+                            <option value="music">音樂</option>
+                            <option value="voice">語音與圓形影片</option>
+                            <option value="all">全部媒體</option>
+                        </select>
+                        <span class="lbl">日期</span><input type="date" id="m-from" title="從"><span class="lbl">～</span><input type="date" id="m-to" title="到">
+                        <span class="lbl">至少</span><input type="number" id="m-min" min="0" step="any" placeholder="0" title="最小大小"><span class="lbl">MB</span>
+                        <select id="m-order" title="排序">
+                            <option value="new">新到舊</option>
+                            <option value="old">舊到新</option>
+                        </select>
+                        <label class="check"><input type="checkbox" id="m-notdl"> 只看未下載</label>
+                        <input type="search" id="m-q" placeholder="搜尋說明文字、檔名">
+                    </div>
+                    <div id="m-wall">
+                        <div id="m-grid" class="wall"></div>
+                        <div id="m-end" class="wall-end"></div>
+                    </div>
                 </div>
             </section>
         </div>

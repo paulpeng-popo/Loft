@@ -19,6 +19,29 @@ const extraEntities = new Map();
 
 const selfId = () => (me ? me.id.toString() : null);
 
+// Topic id of a message in a forum group (the General topic is 1)
+function topicOf(msg) {
+    const r = msg.replyTo;
+    if (!r || !r.forumTopic) return null;
+    return r.replyToTopId || r.replyToMsgId || null;
+}
+
+// All topics of a forum group (paged when there are more than 100)
+async function forumTopics(c, entity) {
+    const all = [];
+    let offset = { offsetDate: 0, offsetId: 0, offsetTopic: 0 };
+    for (let page = 0; page < 20; page++) {
+        const r = await c.invoke(new Api.channels.GetForumTopics({ channel: entity, ...offset, limit: 100 }));
+        const topics = r.topics.filter((t) => t instanceof Api.ForumTopic);
+        all.push(...topics);
+        if (topics.length < 100 || all.length >= r.count) break;
+        const last = topics[topics.length - 1];
+        const lm = r.messages.find((m) => m.id === last.topMessage);
+        offset = { offsetDate: lm ? lm.date : 0, offsetId: last.topMessage, offsetTopic: last.id };
+    }
+    return all;
+}
+
 function rememberEntity(key, entity) {
     if (!dialogCache.entities.has(key)) extraEntities.set(key, entity);
 }
@@ -239,5 +262,5 @@ async function resolveChat(chatId) {
 
 module.exports = {
     getClient, resetClient, authStatus, sendCode, signIn, signInPassword, logout,
-    listDialogs, resolveChat, rememberEntity, selfId,
+    listDialogs, resolveChat, rememberEntity, selfId, forumTopics, topicOf,
 };
