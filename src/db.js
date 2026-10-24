@@ -83,6 +83,20 @@ CREATE TABLE IF NOT EXISTS runs (
     failed INTEGER DEFAULT 0,
     message TEXT
 );
+-- Hidden media: this file and anything that looks the same is left out of the media wall and never downloaded
+CREATE TABLE IF NOT EXISTS hidden (
+    file_key TEXT PRIMARY KEY,
+    chat_id TEXT,
+    msg_id INTEGER,
+    kind TEXT,
+    phash TEXT,
+    aspect REAL,
+    w INTEGER,
+    h INTEGER,
+    duration INTEGER,
+    size INTEGER,
+    hidden_at TEXT NOT NULL
+);
 `);
 
 // Tables and settings left over from before the redesign (filter rules, forwarding, folder upload, notifications, inbox): no longer used, drop them
@@ -227,7 +241,18 @@ const failures = {
     clear: () => db.prepare('DELETE FROM failures').run(),
 };
 
+const hidden = {
+    list: () => db.prepare('SELECT * FROM hidden ORDER BY hidden_at DESC').all(),
+    add(h) {
+        db.prepare(`INSERT OR REPLACE INTO hidden (file_key, chat_id, msg_id, kind, phash, aspect, w, h, duration, size, hidden_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .run(h.key, String(h.chat_id), Number(h.msg_id), h.kind || null, h.phash || null, h.aspect || 0, h.w || 0, h.h || 0,
+                h.duration || 0, h.size || 0, now());
+    },
+    remove: (key) => db.prepare('DELETE FROM hidden WHERE file_key = ?').run(key),
+};
+
 // Runs that were still going when the app was last closed
 db.prepare("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'").run(now());
 
-module.exports = { db, DATA_DIR, getSetting, setSetting, tasks, downloads, runs, fingerprints, failures };
+module.exports = { db, DATA_DIR, getSetting, setSetting, tasks, downloads, runs, fingerprints, failures, hidden };

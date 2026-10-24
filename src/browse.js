@@ -5,6 +5,7 @@ const bigInt = require('big-integer');
 const { Api, utils } = require('telegram');
 const { DATA_DIR, downloads } = require('./db');
 const tg = require('./tg');
+const hidden = require('./hidden');
 
 const CACHE_DIR = path.join(DATA_DIR, 'cache');
 const DIRS = {
@@ -234,7 +235,7 @@ const dayEnd = (s) => (s ? Math.floor(new Date(`${s}T23:59:59`).getTime() / 1000
 /**
  * One page of the media wall. opts:
  *   type (visual / photo / video / gif / document / music / voice / all), topic, from / to (YYYY-MM-DD), minMB,
- *   order (new / old), notDownloaded, q (search captions and file names), cursor, limit
+ *   order (new / old), notDownloaded, q (search captions and file names), cursor, limit, showHidden
  */
 async function media(chatId, opts = {}) {
     const { entity, key } = await tg.resolveChat(chatId);
@@ -243,6 +244,7 @@ async function media(chatId, opts = {}) {
     const oldest = opts.order === 'old';
     const minBytes = Number(opts.minMB) > 0 ? Number(opts.minMB) * 1048576 : 0;
     const generalOnly = entity.forum && Number(opts.topic) === 1;
+    const hiddenKeys = opts.showHidden ? new Set() : hidden.keys();
     const items = [];
     let cursor = Number(opts.cursor) || 0;
     let scanned = 0;
@@ -263,6 +265,7 @@ async function media(chatId, opts = {}) {
             if (!kindOf(m)) continue;
             if (generalOnly && m.replyTo && m.replyTo.forumTopic) continue;
             const it = item(key, m);
+            if (hiddenKeys.has(it.key)) continue;
             if (minBytes && (it.size || 0) < minBytes) continue;
             if (opts.notDownloaded && it.status) continue;
             items.push(it);
@@ -278,7 +281,7 @@ async function media(chatId, opts = {}) {
 
 /**
  * Fills in "looks the same" checks in the background (needs small thumbnails for fingerprints, so it stays out of media() to keep the first render fast).
- * Returns { [msgId]: { status: 'similar', dupOf } }
+ * Returns { [msgId]: { hidden } or { status: 'similar', dupOf } }
  */
 async function check(chatId, ids) {
     const similar = require('./similar');
@@ -289,6 +292,10 @@ async function check(chatId, ids) {
             if (!similar.kindOf(msg)) return;
             const fp = await similar.fingerprint(msg, key);
             if (!fp) return;
+            if (hidden.matchFp(fp)) {
+                out[id] = { hidden: true };
+                return;
+            }
             if (statusOf(key, msg, fp.key).status) return;
             const hit = similar.findDownloaded(fp, 'normal');
             if (hit && !(hit.row.chat_id === key && hit.row.msg_id === msg.id)) {

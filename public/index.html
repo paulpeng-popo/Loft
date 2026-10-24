@@ -56,6 +56,7 @@
                     <ul>
                         <li>點開就是媒體牆，論壇群組會把所有話題合在一起</li>
                         <li>勾選後「下載選取」，或「下載全部符合條件的」</li>
+                        <li>重複的會自動略過；不想看到的按右鍵「隱藏（含相似的）」</li>
                     </ul>
                 </div>
                 <div id="m-chat" class="hidden">
@@ -134,6 +135,12 @@
             <button id="btn-save-dl" class="primary">儲存</button>
         </div>
 
+        <div class="card">
+            <h2>已隱藏的媒體</h2>
+            <p>目前隱藏了 <b id="hidden-count">0</b> 個（連同看起來一樣的，在媒體牆上不顯示、也不下載）。</p>
+            <button id="btn-hidden">查看與取消隱藏…</button>
+        </div>
+
         </div>
         <div class="s-col">
         <div class="card">
@@ -174,6 +181,17 @@
         </div>
     </section>
 </main>
+
+<!-- Hidden media -->
+<dialog id="hidden-dialog">
+    <div class="toolbar">
+        <h2 style="margin:0">已隱藏的媒體</h2>
+        <span class="spacer"></span>
+        <button id="hidden-close">關閉</button>
+    </div>
+    <p class="muted">取消隱藏後，這張和看起來一樣的會重新出現在媒體牆，也可以下載。</p>
+    <div id="hidden-grid" class="hidden-grid"></div>
+</dialog>
 
 <!-- Generic prompt dialog -->
 <dialog id="ask-dialog">

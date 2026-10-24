@@ -206,7 +206,7 @@ function updateTile(it) {
     if (el) el.outerHTML = tileHtml(it);
 }
 
-// Fill in "looks the same" (duplicate) in the background, without slowing the first render
+// Fill in "looks the same" (duplicate) and "hidden" (look-alikes) in the background, without slowing the first render
 async function checkSimilar(chat, list) {
     const ids = list.filter((it) => !it.status && it.thumb && ['photo', 'video', 'gif', 'video_note', 'image'].includes(it.kind)).map((it) => it.id);
     for (let i = 0; i < ids.length; i += 60) {
@@ -215,8 +215,15 @@ async function checkSimilar(chat, list) {
         for (const [id, v] of Object.entries(r)) {
             const it = items.find((x) => x.id === Number(id));
             if (!it) continue;
-            Object.assign(it, v);
-            updateTile(it);
+            if (v.hidden) {
+                items = items.filter((x) => x !== it);
+                selected.delete(it.id);
+                const el = $(`#m-grid .tile[data-id="${it.id}"]`);
+                if (el) el.remove();
+            } else {
+                Object.assign(it, v);
+                updateTile(it);
+            }
         }
         updateSelection();
     }
@@ -321,6 +328,71 @@ $('#m-sel-dl').addEventListener('click', guard(async () => {
     for (const id of [...selected]) setSelected(id, false);
     updateSelection();
 }));
+
+// ---- Context menu ----
+let ctxMenu = null;
+function closeCtx() {
+    if (ctxMenu) ctxMenu.remove();
+    ctxMenu = null;
+}
+function showCtx(x, y, title, entries) {
+    closeCtx();
+    const m = document.createElement('div');
+    m.className = 'ctx-menu';
+    m.innerHTML = (title ? `<div class="ctx-title">${esc(title)}</div>` : '') + entries.map((it, i) => (it === '-' ? '<hr>'
+        : `<button data-i="${i}" class="${it.danger ? 'danger' : ''}">${ico(it.icon)}<span>${esc(it.label)}</span></button>`)).join('');
+    document.body.appendChild(m);
+    const w = m.offsetWidth;
+    const h = m.offsetHeight;
+    m.style.left = `${Math.max(6, Math.min(x, innerWidth - w - 6))}px`;
+    m.style.top = `${Math.max(6, y + h > innerHeight - 6 ? y - h : y)}px`;
+    m.addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-i]');
+        if (!b) return;
+        const it = entries[Number(b.dataset.i)];
+        closeCtx();
+        guard(it.run)();
+    });
+    ctxMenu = m;
+}
+document.addEventListener('mousedown', (e) => { if (ctxMenu && !ctxMenu.contains(e.target)) closeCtx(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCtx(); });
+document.addEventListener('wheel', (e) => { if (ctxMenu && !ctxMenu.contains(e.target)) closeCtx(); }, { passive: true, capture: true });
+window.addEventListener('blur', closeCtx);
+
+$('#m-grid').addEventListener('contextmenu', (e) => {
+    const tile = e.target.closest('.tile[data-id]');
+    if (!tile) return;
+    e.preventDefault();
+    const it = items.find((x) => x.id === Number(tile.dataset.id));
+    if (!it) return;
+    const sel = selected.has(it.id) && selected.size > 1 ? items.filter((x) => selected.has(x.id)) : null;
+    const entries = [];
+    if (sel) entries.push({ icon: 'download', label: `下載選取的 ${sel.length} 個`, run: () => $('#m-sel-dl').click() });
+    entries.push({ icon: 'eye', label: '預覽', run: () => openViewer(items.indexOf(it)) });
+    if (it.status === 'dup' || it.status === 'similar') {
+        entries.push({ icon: 'download', label: '仍然下載（不檢查重複）', run: () => downloadItems([it], { force: true }) });
+    } else if (it.status !== 'done') {
+        entries.push({ icon: 'download', label: '下載', run: () => downloadItems([it]) });
+    }
+    entries.push({ icon: 'select', label: selected.has(it.id) ? '取消選取' : '選取', run: () => { setSelected(it.id, !selected.has(it.id)); updateSelection(); } });
+    entries.push('-', { icon: 'ban', label: '隱藏（含相似的）', danger: true, run: () => hideItem(it) });
+    const why = it.status === 'done' ? `已下載：${it.path}` : it.dupOf ? `${it.dupOf.why}：${it.dupOf.path}` : '';
+    showCtx(e.clientX, e.clientY, why, entries);
+});
+
+async function hideItem(it) {
+    if (!(await confirmBox('隱藏這個媒體，和所有看起來一樣的？\n不管在哪個群組，之後媒體牆都不顯示、下載也會略過。\n可以到「設定 → 已隱藏的媒體」取消。', { ok: '隱藏', danger: true }))) return;
+    await api('POST', `/api/chat/${enc(it.chat)}/hide`, { id: it.id });
+    // Remove this one first; re-check the look-alikes on the same page
+    items = items.filter((x) => x !== it);
+    selected.delete(it.id);
+    const el = $(`#m-grid .tile[data-id="${it.id}"]`);
+    if (el) el.remove();
+    updateSelection();
+    toast('已隱藏（含相似的）');
+    checkSimilar(cur, items.filter((x) => !x.status));
+}
 
 // =====================================================================
 // Viewer

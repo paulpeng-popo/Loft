@@ -143,6 +143,7 @@ function showTab(name) {
     if (name === 'log') pollStatus();
     if (name === 'settings') {
         guard(loadCacheSize)();
+        guard(loadHiddenCount)();
     }
     try { localStorage.setItem('tab', name); } catch { /* private mode */ }
 }
@@ -286,6 +287,32 @@ $('#btn-clear-cache').addEventListener('click', guard(async () => {
     await api('DELETE', '/api/cache');
     toast('快取已清除');
     loadCacheSize();
+}));
+
+// ---- Hidden media ----
+async function loadHiddenCount() {
+    $('#hidden-count').textContent = (await api('GET', '/api/hidden')).length;
+}
+async function renderHidden() {
+    const list = await api('GET', '/api/hidden');
+    $('#hidden-count').textContent = list.length;
+    $('#hidden-grid').innerHTML = list.map((h) => `<div class="h-item" title="隱藏於 ${esc(fmtTime(h.at))}">
+        <img loading="lazy" src="/api/hidden/${enc(h.key)}/thumb" alt="" onerror="this.remove()">
+        <button data-unhide="${esc(h.key)}">取消隱藏</button></div>`).join('') || '<p class="muted">沒有隱藏任何媒體。</p>';
+}
+$('#btn-hidden').addEventListener('click', guard(async () => {
+    $('#hidden-grid').innerHTML = '<p class="muted">讀取中…</p>';
+    $('#hidden-dialog').showModal();
+    await renderHidden();
+}));
+$('#hidden-close').addEventListener('click', () => $('#hidden-dialog').close());
+$('#hidden-grid').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('[data-unhide]');
+    if (!b) return;
+    await api('DELETE', `/api/hidden/${enc(b.dataset.unhide)}`);
+    toast('已取消隱藏');
+    await renderHidden();
+    if (typeof reloadWall === 'function') reloadWall();
 }));
 
 // ---- Startup ----

@@ -1,6 +1,6 @@
 // Downloads: everything goes through one queue, one job at a time.
 // Duplicate checks are built in, nothing to configure:
-//   Before download: this message already downloaded -> this Telegram file already downloaded -> looks the same (similarity fingerprint)
+//   Before download: hidden -> this message already downloaded -> this Telegram file already downloaded -> looks the same (similarity fingerprint)
 //   After download: same content hash -> delete the just-downloaded temp file right away (not sent to the Recycle Bin)
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,6 +11,7 @@ const tg = require('./tg');
 const { log, lines: logLines } = require('./log');
 const fastdl = require('./fastdl');
 const similar = require('./similar');
+const hidden = require('./hidden');
 
 // Types a task can pick (stickers are not media downloads)
 const MEDIA_TYPES = ['photo', 'video', 'gif', 'document', 'audio', 'voice', 'video_note'];
@@ -66,6 +67,7 @@ const inflightKeys = new Set(); // Telegram files being downloaded right now (du
 async function precheck(chatKey, msg, info, runFps, force) {
     if (downloads.byMessage(chatKey, msg.id)) return { skip: '這則已下載過' };
     if (force) return {};
+    if (await hidden.check(msg)) return { skip: '已隱藏' };
     if (info.key) {
         const hit = downloads.byKey(info.key);
         if (hit) return { skip: `同一個檔案已下載（${hit.chat_title || hit.chat_id} #${hit.msg_id}）` };

@@ -4,6 +4,7 @@ const path = require('node:path');
 const express = require('express');
 const { getSetting, setSetting, downloads } = require('./db');
 const fastdl = require('./fastdl');
+const hidden = require('./hidden');
 const tg = require('./tg');
 const downloader = require('./downloader');
 const browse = require('./browse');
@@ -113,7 +114,7 @@ const sendImage = (getFile) => (req, res) => {
 const bool = (v) => v === '1' || v === 'true' || v === true;
 app.get('/api/chat/:chat/avatar', sendImage((req) => browse.avatar(req.params.chat)));
 app.get('/api/chat/:chat/media', wrap((req) => browse.media(req.params.chat, {
-    ...req.query, notDownloaded: bool(req.query.notDownloaded),
+    ...req.query, notDownloaded: bool(req.query.notDownloaded), showHidden: bool(req.query.showHidden),
 })));
 app.post('/api/chat/:chat/check', wrap((req) => browse.check(req.params.chat, (req.body.ids || []).map(Number))));
 // After downloads, update the media wall's "downloaded / duplicate" marks: items = [{ id, key }]
@@ -174,6 +175,18 @@ app.get('/api/chat/:chat/stream/:msg', async (req, res) => {
         else res.destroy();
     }
 });
+
+// ---- Hide (including look-alikes) ----
+app.post('/api/chat/:chat/hide', wrap(async (req) => {
+    const { msg, key } = await browse.getMessage(req.params.chat, req.body.id);
+    return hidden.hide(msg, key);
+}));
+app.get('/api/hidden', wrap(() => hidden.list()));
+app.get('/api/hidden/:key/thumb', sendImage(async (req) => {
+    const h = hidden.list().find((x) => x.key === req.params.key);
+    return h ? browse.thumb(h.chat, h.msg, 'small') : null;
+}));
+app.delete('/api/hidden/:key', wrap((req) => hidden.unhide(req.params.key)));
 
 // ---- Downloads ----
 // Selected on the media wall (jumps the queue); force = download anyway, skips duplicate checks
