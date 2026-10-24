@@ -35,6 +35,7 @@ const fmtSize = (n) => {
     while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
     return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 };
+const fmtTime = (s) => (s ? new Date(s).toLocaleString('zh-TW', { hour12: false }) : '-');
 // A time that fits on one line: within the same year show only month/day hour:minute
 function shortStamp(iso) {
     if (!iso) return '';
@@ -139,6 +140,7 @@ function showTab(name) {
     document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('hidden', s.id !== `tab-${name}`));
     if (name === 'media' && typeof loadChats === 'function') guard(loadChats)();
+    if (name === 'log') pollStatus();
     if (name === 'settings') {
         guard(loadCacheSize)();
     }
@@ -146,8 +148,10 @@ function showTab(name) {
 }
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
-// ---- Status polling: login state ----
+// ---- Status polling: login state, download progress bar, log ----
 let lastAuth = null;
+let pollBusy = false;
+let wasRunning = false;
 async function pollStatus() {
     try {
         const s = await api('GET', '/api/status');
@@ -164,18 +168,72 @@ async function pollStatus() {
         if (s.auth.authorized) $('#login-user').textContent = s.auth.user.name + (s.auth.user.username ? ` (@${s.auth.user.username})` : '');
         if (lastAuth === false && s.auth.authorized && typeof loadChats === 'function') guard(loadChats)(true);
         lastAuth = s.auth.authorized;
+
+        const now = $('#now');
+        if (s.running) {
+            const r = s.running;
+            const cur = r.current;
+            let text = `${r.taskName}｜掃描 ${r.scanned}・下載 ${r.downloaded}・略過 ${r.skipped}・失敗 ${r.failed}`;
+            if (cur) text += `｜${cur.name} ${fmtSize(cur.received)} / ${fmtSize(cur.size)}`;
+            if (s.queue.length) text += `｜排隊：${s.queue.map((q) => q.taskName).join('、')}`;
+            now.querySelector('.now-text').textContent = text;
+            now.querySelector('.bar div').style.width = cur && cur.size ? `${Math.min(100, (cur.received / cur.size) * 100)}%` : '0';
+            now.classList.remove('hidden');
+        } else {
+            now.classList.add('hidden');
+        }
+        // Downloads finished: refresh the media wall's downloaded marks
+        if (wasRunning && !s.running) {
+            if (typeof refreshStatuses === 'function') refreshStatuses();
+        }
+        wasRunning = !!s.running;
+
+        const logEl = $('#log');
+        const lastLine = s.log.length ? s.log[s.log.length - 1].time + s.log.length : '';
+        if (currentTab === 'log' && logEl.dataset.last !== lastLine) {
+            const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 10;
+            logEl.textContent = s.log.map((l) => `${fmtTime(l.time)}  ${l.msg}`).join('\n');
+            logEl.dataset.last = lastLine;
+            if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+        }
+        pollBusy = !!s.running || s.queue.length > 0;
     } catch {
         $('#auth-badge').textContent = '伺服器離線';
         $('#auth-badge').className = 'badge bad';
     }
 }
+$('#btn-stop').addEventListener('click', guard(async () => {
+    await api('POST', '/api/stop');
+    toast('已要求停止，正在下載的檔案抓完就會停');
+}));
 
 // ---- Settings ----
 async function loadSettings() {
     settings = await api('GET', '/api/settings');
     $('#set-api-id').value = settings.api_id;
     $('#set-api-hash').placeholder = settings.has_api_hash ? '已儲存（要更換才填）' : '';
+    $('#set-root').value = settings.download_root;
+    $('#set-template').value = settings.name_template || '';
+    $('#set-file-workers').value = settings.dl_file_workers;
+    $('#set-part-workers').value = settings.dl_part_workers;
+    $('#set-speed').value = settings.dl_speed_limit || '0';
 }
+$('#btn-save-dl').addEventListener('click', guard(async () => {
+    await api('PUT', '/api/settings', {
+        download_root: $('#set-root').value,
+        name_template: $('#set-template').value,
+        dl_file_workers: $('#set-file-workers').value,
+        dl_part_workers: $('#set-part-workers').value,
+        dl_speed_limit: $('#set-speed').value,
+    });
+    await loadSettings();
+    toast('下載設定已儲存');
+}));
+$('#btn-pick-root').addEventListener('click', guard(async () => {
+    toast('已開啟選擇資料夾的視窗（可能在瀏覽器後面）');
+    const p = (await api('POST', '/api/pick-folder')).path;
+    if (p) $('#set-root').value = p;
+}));
 $('#btn-save-api').addEventListener('click', guard(async () => {
     const credsChanged = $('#set-api-id').value.trim() !== String(settings.api_id || '') || !!$('#set-api-hash').value;
     if (credsChanged && lastAuth && !(await confirmBox('你正在更換 API 憑證。\n儲存後會中斷目前的 Telegram 連線，正在跑的下載會失敗，可能需要重新登入。確定？', { ok: '儲存', danger: true }))) return;
@@ -240,10 +298,10 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!document.querySelector(`nav button[data-tab="${startTab}"]`)) startTab = 'media';
     showTab(startTab);
     pollStatus();
-    // Refresh every 5 seconds
+    // Refresh every 1.5 seconds while a download is running or the log is open, otherwise every 5 seconds
     const loop = async () => {
         await pollStatus();
-        setTimeout(loop, 5000);
+        setTimeout(loop, pollBusy || currentTab === 'log' ? 1500 : 5000);
     };
     setTimeout(loop, 1500);
 });

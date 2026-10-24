@@ -9,6 +9,8 @@ let items = []; // items loaded on the media wall so far
 let cursor = 0; // where the next page continues from (null = no more)
 let loading = false;
 let wallSeq = 0; // bumped whenever the group or filters change; stale responses are dropped
+const selected = new Set(); // selected msgIds
+let lastClicked = null; // for Shift range selection
 
 function avatarHtml(chat) {
     const color = AVATAR_COLORS[Math.abs(parseInt(String(chat.id).slice(-4), 10) || 0) % AVATAR_COLORS.length];
@@ -88,6 +90,8 @@ $('#c-list').addEventListener('click', (e) => {
 // =====================================================================
 async function openChat(d) {
     cur = d;
+    selected.clear();
+    lastClicked = null;
     document.querySelectorAll('#c-list li').forEach((li) => li.classList.toggle('active', li.dataset.id === d.id));
     $('.browse').classList.add('open');
     $('#m-empty').classList.add('hidden');
@@ -133,6 +137,7 @@ async function reloadWall() {
     $('#m-grid').innerHTML = Array.from({ length: 24 }, () => '<div class="tile skeleton"></div>').join('');
     $('#m-end').textContent = '';
     $('#m-wall').scrollTop = 0;
+    updateSelection();
     await loadMore();
 }
 
@@ -173,9 +178,9 @@ function tileHtml(it) {
     const body = it.thumb
         ? `<img loading="lazy" decoding="async" src="/api/chat/${enc(it.chat)}/thumb/${it.id}?s=small" alt="" onload="this.classList.add('loaded')" onerror="this.remove()">`
         : `<div class="noimg">${ico(icon)}<span class="fn">${esc(it.name || it.title || TYPE_LABELS[it.kind] || '檔案')}</span></div>`;
-    return `<div class="tile${it.status === 'dup' || it.status === 'similar' ? ' is-dup' : ''}" data-id="${it.id}"
+    return `<div class="tile${selected.has(it.id) ? ' selected' : ''}${it.status === 'dup' || it.status === 'similar' ? ' is-dup' : ''}" data-id="${it.id}"
         style="${it.blur ? `background-image:url(${it.blur})` : ''}" title="${esc([shortStamp(it.date), it.sender, it.caption].filter(Boolean).join('\n'))}">
-        ${body}${flag}${info ? `<span class="info">${info}</span>` : ''}</div>`;
+        ${body}<span class="sel" title="選取">${ico('check')}</span>${flag}${info ? `<span class="info">${info}</span>` : ''}</div>`;
 }
 
 // Append to the end of the media wall, grouped by date
@@ -193,6 +198,27 @@ function appendTiles(list) {
     }
     grid.insertAdjacentHTML('beforeend', html);
     grid.dataset.lastDay = lastDay;
+}
+
+function updateTile(it) {
+    const el = $(`#m-grid .tile[data-id="${it.id}"]`);
+    if (el) el.outerHTML = tileHtml(it);
+}
+
+// After downloads, update the "downloaded / duplicate" marks
+async function refreshStatuses() {
+    if (!cur || !items.length) return;
+    const chat = cur;
+    const r = await api('POST', `/api/chat/${enc(chat.id)}/status`, { items: items.map((it) => ({ id: it.id, key: it.key })) }).catch(() => null);
+    if (!r || cur !== chat) return;
+    for (const it of items) {
+        const v = r[it.id];
+        const status = v ? v.status : it.status === 'similar' ? 'similar' : null;
+        if (status !== it.status || (v && v.path !== it.path)) {
+            Object.assign(it, v || { status });
+            updateTile(it);
+        }
+    }
 }
 
 // Reload as soon as a filter changes
@@ -214,12 +240,70 @@ $('#m-wall').addEventListener('scroll', () => {
     if (w.scrollTop + w.clientHeight >= w.scrollHeight - 600) guard(loadMore)();
 });
 
+// ---- Selection ----
+function updateSelection() {
+    const n = selected.size;
+    $('#m-sel-info').textContent = n ? `已選 ${n} 個` : `${items.length ? `${items.length} 個媒體` : ''}`;
+    $('#m-sel-dl').disabled = !n;
+    $('#m-sel-none').classList.toggle('hidden', !n);
+    $('#m-grid').classList.toggle('selecting', n > 0);
+}
+function setSelected(id, on) {
+    if (on) selected.add(id);
+    else selected.delete(id);
+    const el = $(`#m-grid .tile[data-id="${id}"]`);
+    if (el) el.classList.toggle('selected', on);
+}
+
 $('#m-grid').addEventListener('click', (e) => {
     const tile = e.target.closest('.tile[data-id]');
     if (!tile) return;
     const id = Number(tile.dataset.id);
+    // Click on the checkbox, or while already selecting / holding Ctrl: toggle; Shift: range select
+    if (e.target.closest('.sel') || e.ctrlKey || e.metaKey || e.shiftKey || selected.size) {
+        if (e.shiftKey && lastClicked != null) {
+            const a = items.findIndex((x) => x.id === lastClicked);
+            const b = items.findIndex((x) => x.id === id);
+            for (let i = Math.min(a, b); i <= Math.max(a, b); i++) setSelected(items[i].id, true);
+        } else {
+            setSelected(id, !selected.has(id));
+        }
+        lastClicked = id;
+        updateSelection();
+        return;
+    }
     openViewer(items.findIndex((x) => x.id === id));
 });
+$('#m-sel-all').addEventListener('click', () => {
+    for (const it of items) if (it.status !== 'done') setSelected(it.id, true);
+    updateSelection();
+});
+$('#m-sel-none').addEventListener('click', () => {
+    for (const id of [...selected]) setSelected(id, false);
+    updateSelection();
+});
+document.addEventListener('keydown', (e) => {
+    if (currentTab !== 'media' || $('#viewer').open || document.querySelector('dialog[open]')) return;
+    if (e.key === 'Escape' && selected.size) $('#m-sel-none').click();
+    if (e.key === 'a' && (e.ctrlKey || e.metaKey) && cur && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+        e.preventDefault();
+        $('#m-sel-all').click();
+    }
+});
+
+// ---- Download ----
+async function downloadItems(list, { force = false } = {}) {
+    if (!list.length) return;
+    await api('POST', '/api/download', { items: list.map((it) => ({ chat: it.chat, id: it.id })), force, label: `下載 ${list.length} 個（${cur.title}）` });
+    toast(`已加入下載：${list.length} 個${force ? '（不檢查重複）' : '，重複的會自動略過'}`);
+    pollStatus();
+}
+$('#m-sel-dl').addEventListener('click', guard(async () => {
+    const list = items.filter((it) => selected.has(it.id));
+    await downloadItems(list);
+    for (const id of [...selected]) setSelected(id, false);
+    updateSelection();
+}));
 
 // =====================================================================
 // Viewer
@@ -263,6 +347,7 @@ function renderViewer() {
     $('#viewer-caption').classList.toggle('hidden', !it.caption);
     $('#viewer-prev').disabled = vIndex <= 0;
     $('#viewer-next').disabled = vIndex >= items.length - 1 && cursor === null;
+    $('#viewer-download').title = it.status === 'done' ? '已下載' : it.dupOf ? '仍然下載（不檢查重複）' : '下載（D）';
     // Near the last one: load the next page ahead of time
     if (vIndex >= items.length - 5) guard(loadMore)();
 }
@@ -309,6 +394,11 @@ $('#viewer-play').addEventListener('click', () => {
         guard(viewerStep)(1);
     }, 3000);
 });
+$('#viewer-download').addEventListener('click', guard(async () => {
+    const it = items[vIndex];
+    if (!it || it.status === 'done') return toast(it ? `已下載：${it.path}` : '');
+    await downloadItems([it], { force: !!it.dupOf });
+}));
 document.addEventListener('keydown', (e) => {
     if (!$('#viewer').open) return;
     if (e.key === 'ArrowLeft') guard(viewerStep)(-1);
@@ -317,6 +407,7 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         $('#viewer-play').click();
     } else if (e.key.toLowerCase() === 'z') $('#viewer-zoom').click();
+    else if (e.key.toLowerCase() === 'd') $('#viewer-download').click();
 });
 // Mouse wheel: previous / next (when zoomed in, the wheel scrolls instead)
 let wheelAt = 0;

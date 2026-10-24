@@ -11,6 +11,7 @@
     <h1><span class="logo" data-icon="download"></span> Loft</h1>
     <nav>
         <button data-tab="media" data-icon="image">媒體</button>
+        <button data-tab="log" data-icon="log">日誌</button>
         <button data-tab="settings" data-icon="settings">設定</button>
     </nav>
     <div class="header-tools">
@@ -20,6 +21,12 @@
         <div id="auth-badge" class="badge">…</div>
     </div>
 </header>
+
+<section id="now" class="hidden">
+    <div class="now-text"></div>
+    <div class="bar"><div></div></div>
+    <button id="btn-stop" class="danger small">停止</button>
+</section>
 
 <main>
     <!-- Media -->
@@ -48,6 +55,7 @@
                     <h2>選一個群組或頻道</h2>
                     <ul>
                         <li>點開就是媒體牆，論壇群組會把所有話題合在一起</li>
+                        <li>勾選後「下載選取」，或「下載全部符合條件的」</li>
                     </ul>
                 </div>
                 <div id="m-chat" class="hidden">
@@ -81,6 +89,13 @@
                         <label class="check"><input type="checkbox" id="m-notdl"> 只看未下載</label>
                         <input type="search" id="m-q" placeholder="搜尋說明文字、檔名">
                     </div>
+                    <div class="actionbar">
+                        <span class="sel-info" id="m-sel-info">還沒選取</span>
+                        <button id="m-sel-all" class="small">全選目前顯示的</button>
+                        <button id="m-sel-none" class="small hidden">取消選取</button>
+                        <button id="m-sel-dl" class="small primary" disabled>下載選取</button>
+                        <span class="spacer"></span>
+                    </div>
                     <div id="m-wall">
                         <div id="m-grid" class="wall"></div>
                         <div id="m-end" class="wall-end"></div>
@@ -90,9 +105,36 @@
         </div>
     </section>
 
+    <!-- Log -->
+    <section id="tab-log" class="tab hidden">
+        <pre id="log"></pre>
+    </section>
+
     <!-- Settings -->
     <section id="tab-settings" class="tab hidden">
         <div class="settings-cols">
+        <div class="s-col">
+        <div class="card">
+            <h2>下載</h2>
+            <label>下載資料夾
+                <div class="row">
+                    <input id="set-root" placeholder="留空 = 系統的「下載」資料夾裡的 Telegram">
+                    <button id="btn-pick-root">瀏覽…</button>
+                </div>
+            </label>
+            <p class="muted">每個群組會有自己的子資料夾（排程任務可以另外指定資料夾）。</p>
+            <label>檔名範本 <input id="set-template" placeholder="{id}_{name}"></label>
+            <p class="muted">可用：{id} 訊息編號、{name} 原檔名、{basename}、{ext}、{date} 日期、{time} 時間、{type} 類型、{chat} 群組名稱、{topic} 話題名稱、{album} 相簿、{sender} 發送者、{caption} 說明文字前 30 字。/ 會建立子資料夾，例如 {date}/{name}、{album}/{id}_{name}。</p>
+            <div class="grid three">
+                <label>速度上限（MB/s，0 = 不限） <input id="set-speed" type="number" min="0" step="0.5"></label>
+                <label>同時下載幾個檔案（1–5） <input id="set-file-workers" type="number" min="1" max="5"></label>
+                <label>大檔分幾段同時抓（1–8） <input id="set-part-workers" type="number" min="1" max="8"></label>
+            </div>
+            <p class="muted">重複的檔案會自動略過，不用設定：同一則訊息、同一個 Telegram 檔案、看起來一樣的圖片影片都不會重抓；下載完內容完全相同的也會直接刪掉。</p>
+            <button id="btn-save-dl" class="primary">儲存</button>
+        </div>
+
+        </div>
         <div class="s-col">
         <div class="card">
             <h2>Telegram 登入</h2>
@@ -148,6 +190,7 @@
         <span class="spacer"></span>
         <button id="viewer-zoom" class="v-btn" data-icon="zoom" title="縮放（Z）"></button>
         <button id="viewer-play" class="v-btn" data-icon="play" title="幻燈片（空白鍵）"></button>
+        <button id="viewer-download" class="v-btn" data-icon="download" title="下載（D）"></button>
         <button id="viewer-close" class="v-btn" data-icon="close" title="關閉（Esc）"></button>
     </div>
     <button id="viewer-prev" class="v-nav prev" data-icon="left" title="上一個（←）"></button>

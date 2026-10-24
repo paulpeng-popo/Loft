@@ -2,7 +2,7 @@ require('./logfile'); // load first: log rotation, filters connection-timeout no
 const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
-const { getSetting, setSetting } = require('./db');
+const { getSetting, setSetting, downloads } = require('./db');
 const fastdl = require('./fastdl');
 const tg = require('./tg');
 const downloader = require('./downloader');
@@ -52,6 +52,25 @@ app.put('/api/settings', wrap(async (req) => {
     downloader.log(credsChanged ? '設定已更新（API 憑證變更，重新連線）' : '設定已更新');
 }));
 
+// Open the Windows folder picker
+app.post('/api/pick-folder', wrap(() => new Promise((resolve, reject) => {
+    if (process.platform !== 'win32') {
+        reject(new Error('這個系統只能直接貼上路徑'));
+        return;
+    }
+    const ps = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false; WindowState = "Minimized" }',
+        '$owner.Show(); $owner.Hide()',
+        '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
+        '$d.Description = "選擇資料夾"',
+        'if ($d.ShowDialog($owner) -eq "OK") { [Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Out.Write($d.SelectedPath) }',
+    ].join('; ');
+    require('node:child_process').execFile('powershell.exe', ['-NoProfile', '-STA', '-NonInteractive', '-Command', ps],
+        { windowsHide: false, encoding: 'utf8', timeout: 10 * 60 * 1000 },
+        (err, stdout) => (err ? reject(new Error('開不了選擇資料夾的視窗，請直接貼上路徑')) : resolve({ path: String(stdout || '').trim() })));
+})));
+
 // ---- Login ----
 app.post('/api/auth/send-code', wrap((req) => tg.sendCode(String(req.body.phone || '').trim())));
 app.post('/api/auth/sign-in', wrap((req) => tg.signIn(req.body.code)));
@@ -96,6 +115,19 @@ app.get('/api/chat/:chat/avatar', sendImage((req) => browse.avatar(req.params.ch
 app.get('/api/chat/:chat/media', wrap((req) => browse.media(req.params.chat, {
     ...req.query, notDownloaded: bool(req.query.notDownloaded),
 })));
+// After downloads, update the media wall's "downloaded / duplicate" marks: items = [{ id, key }]
+app.post('/api/chat/:chat/status', wrap((req) => {
+    const out = {};
+    for (const it of (req.body.items || []).slice(0, 500)) {
+        const own = downloads.byMessage(req.params.chat, it.id);
+        if (own) out[it.id] = { status: 'done', path: own.path };
+        else {
+            const same = it.key && downloads.byKey(it.key);
+            if (same) out[it.id] = { status: 'dup', dupOf: { chat: same.chat_title || same.chat_id, path: same.path, why: '同一個檔案' } };
+        }
+    }
+    return out;
+}));
 app.get('/api/chat/:chat/topics', wrap((req) => browse.topics(req.params.chat)));
 app.get('/api/chat/:chat/thumb/:msg', sendImage((req) => browse.thumb(req.params.chat, req.params.msg, req.query.s === 'small' ? 'small' : 'large')));
 app.get('/api/chat/:chat/file/:msg', (req, res) => {
