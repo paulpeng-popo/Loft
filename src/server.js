@@ -2,11 +2,12 @@ require('./logfile'); // load first: log rotation, filters connection-timeout no
 const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
-const { getSetting, setSetting, downloads } = require('./db');
+const { getSetting, setSetting, tasks, downloads } = require('./db');
 const fastdl = require('./fastdl');
 const hidden = require('./hidden');
 const tg = require('./tg');
 const downloader = require('./downloader');
+const scheduler = require('./scheduler');
 const browse = require('./browse');
 
 const PORT = Number(process.env.PORT) || 8787;
@@ -24,6 +25,12 @@ const wrap = (fn) => (req, res) => {
             res.status(400).json({ error: e.errorMessage || e.message || String(e) });
         });
 };
+
+function validateTask(t) {
+    if (!t.chat_id) throw new Error('請選擇群組或頻道');
+    if (t.cron && !scheduler.validate(t.cron)) throw new Error(`排程格式不正確：${t.cron}`);
+    return t;
+}
 
 // ---- Status and settings ----
 app.get('/api/status', wrap(async () => ({ auth: await tg.authStatus(), ...downloader.snapshot() })));
@@ -201,6 +208,26 @@ app.delete('/api/cache', wrap(() => {
     downloader.log('已清除快取');
 }));
 
+// ---- Tasks ----
+app.get('/api/tasks', wrap(() => tasks.list()));
+app.post('/api/tasks', wrap((req) => {
+    const t = tasks.create(validateTask(req.body));
+    scheduler.reload();
+    return t;
+}));
+app.put('/api/tasks/:id', wrap((req) => {
+    const t = tasks.update(Number(req.params.id), validateTask(req.body));
+    scheduler.reload();
+    return t;
+}));
+app.delete('/api/tasks/:id', wrap((req) => {
+    tasks.remove(Number(req.params.id));
+    scheduler.reload();
+}));
+app.post('/api/tasks/:id/run', wrap((req) => ({ queued: downloader.enqueue(req.params.id, 'manual') })));
+app.post('/api/tasks/:id/reset', wrap((req) => {
+    tasks.setProgress(Number(req.params.id), Number(req.body.lastMsgId) || 0);
+}));
 app.post('/api/stop', wrap(() => downloader.stop(true)));
 
 /**
@@ -212,6 +239,7 @@ function start() {
         const httpServer = app.listen(PORT, '127.0.0.1', () => {
             const url = `http://127.0.0.1:${PORT}`;
             downloader.log(`Web 介面：${url}`);
+            scheduler.reload();
             // If there is a login, connect right away
             tg.authStatus().then((s) => {
                 downloader.log(s.authorized ? `已登入：${s.user.name}` : '尚未登入 Telegram');

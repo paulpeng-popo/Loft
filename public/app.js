@@ -273,7 +273,7 @@ $('#btn-password').addEventListener('click', guard(async () => {
     pollStatus();
 }));
 $('#btn-logout').addEventListener('click', guard(async () => {
-    if (!(await confirmBox('確定登出？', { ok: '登出', danger: true }))) return;
+    if (!(await confirmBox('確定登出？排程任務在重新登入前都不會執行。', { ok: '登出', danger: true }))) return;
     await api('POST', '/api/auth/logout');
     pollStatus();
 }));

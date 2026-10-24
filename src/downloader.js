@@ -1,4 +1,4 @@
-// Downloads: everything goes through one queue, one job at a time.
+// Downloads: scheduled tasks and media wall downloads all go through one queue, one job at a time.
 // Duplicate checks are built in, nothing to configure:
 //   Before download: hidden -> this message already downloaded -> this Telegram file already downloaded -> looks the same (similarity fingerprint)
 //   After download: same content hash -> delete the just-downloaded temp file right away (not sent to the Recycle Bin)
@@ -56,6 +56,29 @@ function mediaInfo(msg) {
         ext: name && path.extname(name) ? path.extname(name) : ext,
         key: msg.photo ? `p${msg.photo.id}` : msg.document ? `d${msg.document.id}` : null,
     };
+}
+
+const splitWords = (s) => String(s || '').split(/[,，\n]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+const dayStart = (s) => (s ? Math.floor(new Date(`${s}T00:00:00`).getTime() / 1000) : null);
+const dayEnd = (s) => (s ? Math.floor(new Date(`${s}T23:59:59`).getTime() / 1000) : null);
+
+// Task filters: returns why a message doesn't match, or null when it does
+function rejectReason(msg, info, f) {
+    const types = f.types && f.types.length ? f.types : MEDIA_TYPES;
+    if (!types.includes(info.type)) return '類型';
+    const mb = info.size / 1024 / 1024;
+    if (f.minSizeMB && mb < Number(f.minSizeMB)) return '太小';
+    if (f.maxSizeMB && mb > Number(f.maxSizeMB)) return '太大';
+    if (f.dateFrom && msg.date < dayStart(f.dateFrom)) return '日期';
+    if (f.dateTo && msg.date > dayEnd(f.dateTo)) return '日期';
+    const exts = splitWords(f.extensions).map((e) => (e.startsWith('.') ? e : `.${e}`));
+    if (exts.length && !exts.includes(info.ext.toLowerCase())) return '副檔名';
+    const text = `${msg.message || ''}\n${info.name || ''}`.toLowerCase();
+    const inc = splitWords(f.include);
+    if (inc.length && !inc.some((w) => text.includes(w))) return '關鍵字';
+    const exc = splitWords(f.exclude);
+    if (exc.length && exc.some((w) => text.includes(w))) return '排除字';
+    return null;
 }
 
 const inflightKeys = new Set(); // Telegram files being downloaded right now (duplicates within one batch are fetched only once)
@@ -232,6 +255,114 @@ async function downloadOne({ task, msg, info, key, chatTitle, dir, stats, fp = n
 }
 
 /**
+ * Messages a task looks at: Telegram's media search, each type queried separately and merged by id (text messages are never scanned).
+ * oldest: true = oldest first (downloads), false = newest first
+ */
+async function taskMessages(c, entity, f, { after = 0, oldest = true } = {}) {
+    const browse = require('./browse');
+    const types = f.types && f.types.length ? f.types : MEDIA_TYPES;
+    return browse.mediaStream(c, entity, browse.searchKinds(types), {
+        topic: f.thread || null,
+        minDate: f.dateFrom ? dayStart(f.dateFrom) : 0,
+        maxDate: f.dateTo ? dayEnd(f.dateTo) : 0,
+        after,
+        oldest,
+    });
+}
+
+async function runTask(taskId, trigger) {
+    const task = tasks.get(taskId);
+    if (!task) return;
+    const f = task.filters || {};
+    const incremental = f.incremental !== false;
+    const maxPerRun = Number(f.maxPerRun) || 0;
+    const stats = { scanned: 0, downloaded: 0, skipped: 0, failed: 0 };
+    const runId = runs.start(taskId, trigger);
+    state.cancel = false;
+    state.running = { taskId, taskName: task.name, runId, ...stats, active: new Map() };
+    log(`開始任務「${task.name}」（${trigger}）`);
+
+    let status = 'ok';
+    let message = '';
+    // Download several files at once; progress only advances to the last message before which everything finished, so failures are retried next time
+    const files = fastdl.pool(fastdl.fileWorkers);
+    const runFps = [];
+    const order = [];
+    const results = new Map();
+    let advanceTo = task.last_msg_id;
+    let blocked = false;
+    const advance = () => {
+        while (order.length && results.has(order[0])) {
+            const id = order.shift();
+            if (!results.get(id)) blocked = true;
+            if (!blocked && incremental && id > advanceTo) {
+                advanceTo = id;
+                tasks.setProgress(taskId, advanceTo);
+            }
+        }
+        if (state.running) Object.assign(state.running, stats);
+    };
+    try {
+        const c = await tg.getClient();
+        if (!(await c.checkAuthorization())) throw new Error('尚未登入 Telegram');
+        const { entity, key, title } = await tg.resolveChat(task.chat_id);
+        const chatTitle = task.chat_title || title;
+        const dir = destDir(task, chatTitle);
+        const dateTo = dayEnd(f.dateTo);
+        let queued = 0;
+        for await (const msg of await taskMessages(c, entity, f, { after: incremental ? task.last_msg_id || 0 : 0 })) {
+            if (state.cancel) {
+                status = 'cancelled';
+                break;
+            }
+            if (dateTo && msg.date > dateTo) break;
+            stats.scanned++;
+            order.push(msg.id);
+            const info = mediaInfo(msg);
+            if (info && !rejectReason(msg, info, f)) {
+                require('./browse').remember(key, msg);
+                const pre = await precheck(key, msg, info, runFps, false);
+                if (pre.skip) {
+                    stats.skipped++;
+                    if (!/已下載過/.test(pre.skip)) log(`略過 #${msg.id}：${pre.skip}`);
+                    results.set(msg.id, true);
+                } else {
+                    queued++;
+                    const entry = pre.fp ? { fp: pre.fp, msgId: msg.id } : null;
+                    if (entry) runFps.push(entry);
+                    await files.add(async () => {
+                        results.set(msg.id, await downloadOne({ task, msg, info, key, chatTitle, dir, stats, fp: pre.fp }));
+                        if (entry) runFps.splice(runFps.indexOf(entry), 1);
+                        advance();
+                    });
+                }
+            } else {
+                results.set(msg.id, true);
+            }
+            advance();
+            if (maxPerRun && queued >= maxPerRun) {
+                message = `已達單次上限 ${maxPerRun} 個，剩下的下次再抓`;
+                break;
+            }
+        }
+        await files.drain();
+        advance();
+        if (stats.failed) status = status === 'ok' ? 'partial' : status;
+    } catch (e) {
+        status = 'error';
+        message = e.errorMessage || e.message;
+        log(`「${task.name}」錯誤：${message}`);
+        await files.drain();
+        advance();
+    }
+
+    const summary = `掃描 ${stats.scanned}、下載 ${stats.downloaded}、略過重複 ${stats.skipped}、失敗 ${stats.failed}`;
+    runs.finish(runId, { status, ...stats, message });
+    tasks.setResult(taskId, `${status}｜${summary}${message ? `｜${message}` : ''}`);
+    log(`結束「${task.name}」：${status}，${summary}`);
+}
+
+/**
  * Download specific messages (media wall selection). items = [{ chat, id, taskId? }]
  * opts.force: download anyway, skips the duplicate checks (except for this exact message already downloaded)
  */
@@ -287,6 +418,15 @@ async function runBatch(job) {
 }
 
 // ---- Queue ----
+function enqueue(taskId, trigger = 'manual') {
+    taskId = Number(taskId);
+    // Don't queue something twice; a running job may be queued again
+    if (state.queue.some((q) => q.taskId === taskId && !q.batch)) return false;
+    state.queue.push({ taskId, trigger });
+    pump();
+    return true;
+}
+
 // Media wall downloads jump the queue (right after the job that is currently running)
 function enqueueBatch(items, label = '下載選取的媒體', { force = false, front = true, trigger = 'batch', taskId = null } = {}) {
     if (!items || !items.length) throw new Error('沒有選取任何媒體');
@@ -302,6 +442,7 @@ async function pump() {
     const job = state.queue.shift();
     try {
         if (job.batch) await runBatch(job.batch);
+        else await runTask(job.taskId, job.trigger);
     } catch (e) {
         log(`工作異常：${e.message}`);
     } finally {
@@ -338,5 +479,5 @@ function snapshot() {
 }
 
 module.exports = {
-    MEDIA_TYPES, mediaInfo, enqueueBatch, stop, snapshot, log, fileNameFor,
+    MEDIA_TYPES, mediaInfo, enqueue, enqueueBatch, stop, snapshot, log, rejectReason, fileNameFor,
 };

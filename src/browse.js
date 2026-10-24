@@ -229,6 +229,51 @@ async function searchOne(c, entity, { type, q, topic, minDate, maxDate, cursor, 
     return msgs;
 }
 
+/**
+ * Yields messages of several media types in order (for tasks and previews). Each type is searched and paged on its own, then merged by message id, so text messages are never scanned.
+ * kinds: search types (photovideo / photo / video / gif / document / music / voice)
+ * opts: topic, minDate / maxDate (seconds), after (only messages after this id, used when oldest first), oldest (true = oldest first)
+ */
+async function* mediaStream(c, entity, kinds, { topic, minDate, maxDate, after = 0, oldest = true } = {}) {
+    const streams = kinds.map((type) => ({ type, buf: [], cursor: oldest ? after : 0, done: false }));
+    const seen = new Set();
+    const fill = async (s) => {
+        if (s.buf.length || s.done) return;
+        const page = await searchOne(c, entity, { type: s.type, topic, minDate, maxDate, cursor: s.cursor, oldest, limit: 100 });
+        if (page.length < 100) s.done = true;
+        s.buf = page;
+        if (page.length) s.cursor = page[page.length - 1].id;
+    };
+    for (;;) {
+        await Promise.all(streams.map(fill));
+        let best = null;
+        for (const s of streams) {
+            if (s.buf.length && (!best || (oldest ? s.buf[0].id < best.buf[0].id : s.buf[0].id > best.buf[0].id))) best = s;
+        }
+        if (!best) return;
+        const m = best.buf.shift();
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        // The General topic of a forum: messages without a topic
+        if (Number(topic) === 1 && m.replyTo && m.replyTo.forumTopic) continue;
+        yield m;
+    }
+}
+
+// Task types -> which searches to run
+function searchKinds(types) {
+    const t = new Set(types);
+    const out = [];
+    if (t.has('photo') && t.has('video')) out.push('photovideo');
+    else if (t.has('photo')) out.push('photo');
+    else if (t.has('video')) out.push('video');
+    if (t.has('gif')) out.push('gif');
+    if (t.has('document')) out.push('document');
+    if (t.has('audio')) out.push('music');
+    if (t.has('voice') || t.has('video_note')) out.push('voice');
+    return out;
+}
+
 const dayStart = (s) => (s ? Math.floor(new Date(`${s}T00:00:00`).getTime() / 1000) : 0);
 const dayEnd = (s) => (s ? Math.floor(new Date(`${s}T23:59:59`).getTime() / 1000) : 0);
 
@@ -433,4 +478,5 @@ function clearCache(which = ['thumb', 'file']) {
 
 module.exports = {
     avatar, media, check, topics, folders, thumb, thumbForMsg, original, getMessage, remember, cacheSize, clearCache, kindOf, item,
+    mediaStream, searchKinds,
 };
