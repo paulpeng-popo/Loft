@@ -7,6 +7,8 @@ const CHAT_TYPES = { channel: '頻道', group: '群組', user: '私訊' };
 
 let settings = { media_types: ['photo', 'video', 'gif', 'document', 'audio', 'voice', 'video_note'] };
 let taskList = [];
+let dlView = 'ok';
+let dlPage = 1;
 
 async function api(method, url, body) {
     const res = await fetch(url, {
@@ -150,6 +152,8 @@ function showTab(name) {
     if (name === 'media' && typeof loadChats === 'function') guard(loadChats)();
     if (name === 'tasks') guard(loadTasks)();
     if (name === 'log') pollStatus();
+    if (name === 'downloads') setDlView(dlView);
+    if (name === 'runs') guard(loadRuns)();
     if (name === 'settings') {
         guard(loadCacheSize)();
         guard(loadHiddenCount)();
@@ -192,10 +196,11 @@ async function pollStatus() {
         } else {
             now.classList.add('hidden');
         }
-        // Downloads finished: refresh the task list and the media wall's downloaded marks
+        // Downloads finished: refresh the task list, the media wall's downloaded marks and the failure count
         if (wasRunning && !s.running) {
             if (currentTab === 'tasks') guard(loadTasks)();
             if (typeof refreshStatuses === 'function') refreshStatuses();
+            guard(loadFailCount)();
         }
         wasRunning = !!s.running;
 
@@ -327,12 +332,17 @@ $('#hidden-grid').addEventListener('click', guard(async (e) => {
 
 // ---- Tasks ----
 const RUN_STATUS = { ok: '完成', partial: '部分失敗', error: '錯誤', cancelled: '已停止', interrupted: '中斷', running: '執行中' };
+const RUN_TRIGGER = { manual: '手動', schedule: '排程', batch: '選取', adhoc: '一次性', auto: '自動', retry: '重試' };
 const CRON_NAMES = {
     '*/15 * * * *': '每 15 分鐘', '*/30 * * * *': '每 30 分鐘', '0 * * * *': '每小時', '0 */6 * * *': '每 6 小時', '0 3 * * *': '每天 03:00',
 };
 
 async function loadTasks() {
     taskList = await api('GET', '/api/tasks');
+    const sel = $('#dl-task');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">全部任務</option>' + taskList.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    sel.value = cur;
     $('#task-rows').innerHTML = taskList.map((t) => {
         const [status, ...rest] = (t.last_result || '').split('｜');
         const result = rest.join('｜');
@@ -522,11 +532,131 @@ $('#chat-list').addEventListener('click', (e) => {
     $('#chat-dialog').close();
 });
 
+// ---- Download history ----
+async function loadDownloads() {
+    const params = new URLSearchParams({ q: $('#dl-q').value, task: $('#dl-task').value, page: dlPage });
+    const r = await api('GET', `/api/downloads?${params}`);
+    const pages = Math.max(1, Math.ceil(r.total / 50));
+    $('#dl-total').textContent = `共 ${r.total} 筆`;
+    $('#dl-page').textContent = `${dlPage} / ${pages}`;
+    $('#dl-prev').disabled = dlPage <= 1;
+    $('#dl-next').disabled = dlPage >= pages;
+    $('#dl-rows').innerHTML = r.rows.map((d) => `<tr>
+        <td title="${esc(fmtTime(d.downloaded_at))}">${shortStamp(d.downloaded_at)}</td>
+        <td title="${esc(d.chat_title || d.chat_id)}">${esc(d.chat_title || d.chat_id)}</td>
+        <td class="r">${d.msg_id}</td>
+        <td>${TYPE_LABELS[d.media_type] || esc(d.media_type)}</td><td class="r">${fmtSize(d.size)}</td>
+        <td class="path" title="${esc(d.path)}">${esc(d.path)}</td>
+        <td class="actions">${iconBtn('close', '忘記這筆紀錄（只刪紀錄、不刪檔案；之後可能會重新下載）', `data-forget="${d.id}"`)}</td></tr>`).join('')
+        || '<tr><td colspan="7" class="muted" style="text-align:center">沒有下載紀錄</td></tr>';
+}
+let dlTimer;
+$('#dl-q').addEventListener('input', () => { clearTimeout(dlTimer); dlTimer = setTimeout(() => { dlPage = 1; guard(loadDownloads)(); }, 300); });
+$('#dl-task').addEventListener('change', () => { dlPage = 1; guard(loadDownloads)(); });
+$('#dl-prev').addEventListener('click', () => { dlPage--; guard(loadDownloads)(); });
+$('#dl-next').addEventListener('click', () => { dlPage++; guard(loadDownloads)(); });
+$('#dl-rows').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (!b.dataset.forget) return;
+    await api('DELETE', `/api/downloads/${b.dataset.forget}`);
+    loadDownloads();
+}));
+
+// ---- Failures ----
+let failRows = [];
+async function loadFailCount() {
+    const r = await api('GET', '/api/failures');
+    failRows = r.rows;
+    for (const id of ['#fail-count', '#nav-fail']) {
+        $(id).textContent = r.total;
+        $(id).classList.toggle('hidden', !r.total);
+    }
+    return r;
+}
+async function loadFailures() {
+    await loadFailCount();
+    $('#fail-retry').disabled = !failRows.length;
+    $('#fail-clear').disabled = !failRows.length;
+    $('#fail-rows').innerHTML = failRows.map((f, i) => `<tr>
+        <td title="${esc(fmtTime(f.failed_at))}">${shortStamp(f.failed_at)}</td>
+        <td title="${esc(f.chat_title || f.chat_id)}">${esc(f.chat_title || f.chat_id)}</td>
+        <td class="r">${f.msg_id}</td>
+        <td>${TYPE_LABELS[f.media_type] || esc(f.media_type || '')}</td><td class="r">${f.size ? fmtSize(f.size) : ''}</td><td class="r">${f.attempts}</td>
+        <td title="${esc(f.error || '')}">${esc(f.error || '')}</td>
+        <td class="actions">${iconBtn('refresh', '重試', `data-retry="${i}"`, 'primary')}${iconBtn('close', '從清單拿掉（不會重試）', `data-drop="${i}"`)}</td></tr>`).join('')
+        || '<tr><td colspan="8" class="muted" style="text-align:center">沒有失敗的下載</td></tr>';
+}
+function setDlView(v) {
+    dlView = v;
+    document.querySelectorAll('#dl-view button').forEach((b) => b.classList.toggle('active', b.dataset.v === v));
+    for (const id of ['#dl-ok', '#dl-ok-pager', '#dl-ok-tools']) $(id).classList.toggle('hidden', v !== 'ok');
+    for (const id of ['#dl-fail', '#dl-fail-tools']) $(id).classList.toggle('hidden', v !== 'fail');
+    if (v === 'ok') {
+        guard(loadTasks)();
+        guard(loadDownloads)();
+    }
+    guard(v === 'ok' ? loadFailCount : loadFailures)();
+}
+$('#dl-view').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-v]');
+    if (b) setDlView(b.dataset.v);
+});
+$('#fail-retry').addEventListener('click', guard(async () => {
+    const r = await api('POST', '/api/failures/retry', {});
+    toast(`${r.queued} 個檔案已加入重試佇列`);
+    pollStatus();
+}));
+$('#fail-clear').addEventListener('click', guard(async () => {
+    if (!(await confirmBox('清空失敗清單？只清清單，之後不會重試這些。', { ok: '清空', danger: true }))) return;
+    await api('POST', '/api/failures/clear', {});
+    loadFailures();
+}));
+$('#fail-rows').addEventListener('click', guard(async (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const f = failRows[Number(b.dataset.retry ?? b.dataset.drop)];
+    if (!f) return;
+    const items = [{ chat: f.chat_id, id: f.msg_id }];
+    if (b.dataset.retry != null) {
+        await api('POST', '/api/failures/retry', { items });
+        toast('已加入重試佇列');
+        pollStatus();
+    } else {
+        await api('POST', '/api/failures/clear', { items });
+        loadFailures();
+    }
+}));
+
+// ---- Run history ----
+async function loadRuns() {
+    const r = await api('GET', '/api/runs');
+    $('#run-total').textContent = r.total > r.rows.length ? `共 ${r.total} 筆，顯示最近 ${r.rows.length} 筆` : `共 ${r.total} 筆`;
+    $('#btn-clear-runs').disabled = !r.rows.some((x) => x.status !== 'running');
+    $('#run-rows').innerHTML = r.rows.map((x) => {
+        const name = x.task_name || x.message || '（選取下載）';
+        return `<tr>
+        <td title="${esc(fmtTime(x.started_at))}">${shortStamp(x.started_at)}</td>
+        <td title="${esc(name)}">${esc(name)}</td>
+        <td>${RUN_TRIGGER[x.trigger] || esc(x.trigger || '')}</td>
+        <td class="s-${esc(x.status)}">${RUN_STATUS[x.status] || esc(x.status)}</td>
+        <td class="r">${x.scanned}</td><td class="r">${x.downloaded}</td><td class="r">${x.skipped}</td><td class="r">${x.failed}</td>
+        <td title="${esc(x.message || '')}">${esc(x.message || '')}</td></tr>`;
+    }).join('') || '<tr><td colspan="9" class="muted" style="text-align:center">還沒有執行紀錄</td></tr>';
+}
+$('#btn-clear-runs').addEventListener('click', guard(async () => {
+    if (!(await confirmBox('清除所有執行紀錄？\n只清這個列表，不影響已下載的檔案、下載紀錄和任務進度。正在執行的那筆會保留。', { ok: '清除', danger: true }))) return;
+    const r = await api('DELETE', '/api/runs');
+    toast(`已清除 ${r.removed} 筆執行紀錄`);
+    loadRuns();
+}));
+
 // ---- Startup ----
 window.addEventListener('DOMContentLoaded', () => {
     applyIcons();
     applyPrefs();
     guard(loadSettings)();
+    guard(loadFailCount)();
     let startTab = 'media';
     try { startTab = localStorage.getItem('tab') || 'media'; } catch { /* private mode */ }
     if (!document.querySelector(`nav button[data-tab="${startTab}"]`)) startTab = 'media';

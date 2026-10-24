@@ -399,7 +399,7 @@ async function runTask(taskId, trigger) {
 }
 
 /**
- * Download specific messages (media wall selection). items = [{ chat, id, taskId? }]
+ * Download specific messages (media wall selection, failure retry). items = [{ chat, id, taskId? }]
  * opts.force: download anyway, skips the duplicate checks (except for this exact message already downloaded)
  */
 async function runBatch(job) {
@@ -479,6 +479,17 @@ function enqueueAdhoc(task) {
     return true;
 }
 
+function retryFailures(only) {
+    let list = failures.list();
+    if (only && only.length) {
+        const want = new Set(only.map((x) => `${x.chat}:${x.id}`));
+        list = list.filter((f) => want.has(`${f.chat_id}:${f.msg_id}`));
+    }
+    if (!list.length) throw new Error('沒有失敗的下載');
+    enqueueBatch(list.map((f) => ({ chat: f.chat_id, id: f.msg_id, taskId: f.task_id })), '重試失敗的下載', { front: false, trigger: 'retry' });
+    return { queued: list.length };
+}
+
 async function pump() {
     if (state.running || !state.queue.length) return;
     const job = state.queue.shift();
@@ -522,5 +533,5 @@ function snapshot() {
 }
 
 module.exports = {
-    MEDIA_TYPES, mediaInfo, enqueue, enqueueBatch, enqueueAdhoc, stop, snapshot, preview, log, rejectReason, fileNameFor,
+    MEDIA_TYPES, mediaInfo, enqueue, enqueueBatch, enqueueAdhoc, retryFailures, stop, snapshot, preview, log, rejectReason, fileNameFor,
 };

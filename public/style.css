@@ -176,6 +176,9 @@ main:has(#tab-settings:not(.hidden)) { max-width: none; padding: 0; }
 .toolbar input { max-width: 22rem; }
 .toolbar select { width: auto; }
 .toolbar > .row { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: nowrap; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; }
+.seg button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 /* ---- Tables (one line per cell, long text truncated, hover to see all) ---- */
 table.list { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); table-layout: fixed; }
@@ -187,6 +190,11 @@ table.list .r { text-align: right; font-variant-numeric: tabular-nums; }
 table.list td.path { font-size: .85rem; }
 /* The action column at the right of tables: don't inherit the flex and top margin of the dialog button row .actions (pushes icons down and wraps them) */
 table.list td.actions { display: table-cell; margin: 0; text-align: right; text-overflow: clip; }
+.s-ok { color: var(--ok); }
+.s-error, .s-interrupted { color: var(--danger); }
+.s-partial, .s-cancelled, .s-running { color: var(--warn); }
+.dup { color: var(--muted); text-decoration: line-through; }
+.pager { display: flex; gap: .7rem; align-items: center; justify-content: center; margin-top: .7rem; }
 /* Small icon buttons in tables */
 .ibtn { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0; margin-left: .2rem; border-radius: 8px; color: var(--muted); background: transparent; border-color: transparent; vertical-align: middle; }
 .ibtn .ico { width: 1.05rem; height: 1.05rem; }

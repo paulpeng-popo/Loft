@@ -203,6 +203,11 @@ function addDownloaded(fp, row) {
     loadIndex().push({ ...row, file_key: fp.key, kind: fp.kind, phash: fp.phash, aspect: fp.aspect, w: fp.w, h: fp.h, duration: fp.duration, size: fp.size });
 }
 
+function removeDownloaded(downloadId) {
+    if (!downloadedIndex) return;
+    downloadedIndex = downloadedIndex.filter((r) => r.download_id !== downloadId);
+}
+
 // Find the most similar of the downloaded files
 function findDownloaded(fp, level) {
     let best = null;
@@ -213,4 +218,4 @@ function findDownloaded(fp, level) {
     return best;
 }
 
-module.exports = { fingerprint, ensure, cached, cachedFp, compare, findDownloaded, addDownloaded, kindOf, fileKeyOf, LEVELS };
+module.exports = { fingerprint, ensure, cached, cachedFp, compare, findDownloaded, addDownloaded, removeDownloaded, kindOf, fileKeyOf, LEVELS };

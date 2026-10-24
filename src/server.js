@@ -2,7 +2,8 @@ require('./logfile'); // load first: log rotation, filters connection-timeout no
 const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
-const { getSetting, setSetting, tasks, downloads } = require('./db');
+const { getSetting, setSetting, tasks, downloads, runs, failures } = require('./db');
+const similar = require('./similar');
 const fastdl = require('./fastdl');
 const hidden = require('./hidden');
 const tg = require('./tg');
@@ -232,6 +233,29 @@ app.post('/api/tasks/:id/reset', wrap((req) => {
 }));
 app.post('/api/preview', wrap((req) => downloader.preview(validateTask(req.body), Number(req.body.limit) || 200)));
 app.post('/api/stop', wrap(() => downloader.stop(true)));
+
+// ---- History ----
+app.get('/api/downloads', wrap((req) => downloads.search({
+    q: req.query.q || '',
+    taskId: req.query.task ? Number(req.query.task) : null,
+    page: Math.max(1, Number(req.query.page) || 1),
+})));
+app.delete('/api/downloads/:id', wrap((req) => {
+    downloads.remove(Number(req.params.id));
+    similar.removeDownloaded(Number(req.params.id));
+}));
+app.get('/api/runs', wrap(() => {
+    runs.prune();
+    return { total: runs.count(), rows: runs.recent(100) };
+}));
+app.delete('/api/runs', wrap(() => ({ removed: runs.clear() })));
+app.get('/api/failures', wrap(() => ({ total: failures.count(), rows: failures.list() })));
+app.post('/api/failures/retry', wrap((req) => downloader.retryFailures(req.body.items)));
+app.post('/api/failures/clear', wrap((req) => {
+    if (req.body.items && req.body.items.length) for (const x of req.body.items) failures.remove(x.chat, x.id);
+    else failures.clear();
+    return { total: failures.count() };
+}));
 
 /**
  * Starts the web server, and only connects to Telegram once that succeeds. Returns { url }.

@@ -12,6 +12,8 @@
     <nav>
         <button data-tab="media" data-icon="image">媒體</button>
         <button data-tab="tasks" data-icon="clock">任務</button>
+        <button data-tab="downloads" data-icon="download">下載紀錄 <span id="nav-fail" class="nav-count hidden" title="下載失敗"></span></button>
+        <button data-tab="runs" data-icon="chart">執行紀錄</button>
         <button data-tab="log" data-icon="log">日誌</button>
         <button data-tab="settings" data-icon="settings">設定</button>
     </nav>
@@ -119,6 +121,51 @@
             <colgroup><col style="width:3.5rem"><col style="width:20%"><col style="width:18%"><col style="width:7rem"><col style="width:6rem"><col style="width:7.5rem"><col><col style="width:10.5rem"></colgroup>
             <thead><tr><th>啟用</th><th>名稱</th><th>群組</th><th>排程</th><th>進度</th><th>上次執行</th><th>上次結果</th><th></th></tr></thead>
             <tbody id="task-rows"></tbody>
+        </table></div>
+    </section>
+
+    <!-- Download history -->
+    <section id="tab-downloads" class="tab hidden">
+        <div class="toolbar">
+            <div class="seg" id="dl-view">
+                <button data-v="ok" class="active">已下載</button>
+                <button data-v="fail">失敗 <span id="fail-count" class="nav-count hidden"></span></button>
+            </div>
+            <span id="dl-ok-tools" class="row">
+                <input id="dl-q" placeholder="搜尋檔名、群組、路徑" style="width:16rem">
+                <select id="dl-task" style="width:11rem"><option value="">全部任務</option></select>
+                <span id="dl-total" class="muted"></span>
+            </span>
+            <span id="dl-fail-tools" class="row hidden">
+                <button id="fail-retry" class="small primary">全部重試</button>
+                <button id="fail-clear" class="small">清空清單</button>
+                <span class="muted">失敗的檔案會留在這裡，成功下載後自動移除。</span>
+            </span>
+        </div>
+        <div id="dl-ok" class="scroll-area"><table class="list">
+            <colgroup><col style="width:7.5rem"><col style="width:18%"><col style="width:5.5rem"><col style="width:5rem"><col style="width:6rem"><col><col style="width:6.5rem"></colgroup>
+            <thead><tr><th>時間</th><th>群組</th><th class="r">#</th><th>類型</th><th class="r">大小</th><th>路徑</th><th></th></tr></thead>
+            <tbody id="dl-rows"></tbody>
+        </table></div>
+        <div id="dl-ok-pager" class="pager"><button id="dl-prev">上一頁</button><span id="dl-page"></span><button id="dl-next">下一頁</button></div>
+        <div id="dl-fail" class="scroll-area hidden"><table class="list">
+            <colgroup><col style="width:7.5rem"><col style="width:18%"><col style="width:5.5rem"><col style="width:5rem"><col style="width:6rem"><col style="width:4rem"><col><col style="width:6.5rem"></colgroup>
+            <thead><tr><th>最後失敗</th><th>群組</th><th class="r">#</th><th>類型</th><th class="r">大小</th><th class="r">次數</th><th>錯誤</th><th></th></tr></thead>
+            <tbody id="fail-rows"></tbody>
+        </table></div>
+    </section>
+
+    <!-- Run history -->
+    <section id="tab-runs" class="tab hidden">
+        <div class="toolbar">
+            <span id="run-total" class="muted"></span>
+            <span class="spacer"></span>
+            <button id="btn-clear-runs" class="small">清除執行紀錄</button>
+        </div>
+        <div class="scroll-area"><table class="list">
+            <colgroup><col style="width:7.5rem"><col style="width:22%"><col style="width:4.5rem"><col style="width:5.5rem"><col style="width:4rem"><col style="width:4rem"><col style="width:4rem"><col style="width:4rem"><col></colgroup>
+            <thead><tr><th>開始</th><th>名稱</th><th>觸發</th><th>狀態</th><th class="r">掃描</th><th class="r">下載</th><th class="r">略過</th><th class="r">失敗</th><th>訊息</th></tr></thead>
+            <tbody id="run-rows"></tbody>
         </table></div>
     </section>
 
